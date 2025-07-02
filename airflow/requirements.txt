@@ -1,0 +1,2 @@
+# https://auth.run.house/v1/package/kubetorch-<KT_VERSION>-py3-none-any.whl?license_key=<KT_LICENSE_KEY>&api_key=<KT_API_KEY>
+https://auth.run.house/v1/package/kubetorch-0.1.8-py3-none-any.whl?license_key=17c97d-9311ea-ef51bf&api_key=GXfPINPIA-o5nxieMoQ2_shj-EvEyY4h5RVY3EQc50A=

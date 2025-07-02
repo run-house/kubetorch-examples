@@ -1,0 +1,51 @@
+# Minimal Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-worker-kubetorch-minimal-binding
+  namespace: default  # TODO: Update if needed or add duplicate with `kubetorch`
+  labels:
+    app: airflow
+    component: worker-permissions
+    source-role: kubetorch-role
+subjects:
+- kind: ServiceAccount
+  name: airflow-worker
+  namespace: airflow
+roleRef:
+  kind: Role
+  name: kubetorch-minimal-role  # Existing role
+  apiGroup: rbac.authorization.k8s.io
+---
+# ConfigMap Reader Role
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: airflow-worker-kubetorch-configmap-reader-binding
+  namespace: kubetorch  # Existing role namespace
+  labels:
+    app: airflow
+    component: worker-permissions
+    source-role: kubetorch-role
+subjects:
+- kind: ServiceAccount
+  name: airflow-worker
+  namespace: airflow
+roleRef:
+  kind: Role
+  name: kubetorch-configmap-reader  # Existing role
+  apiGroup: rbac.authorization.k8s.io
+# ---
+# # For each existing ClusterRole you want to grant
+# apiVersion: rbac.authorization.k8s.io/v1
+# kind: ClusterRoleBinding
+# metadata:
+#   name: airflow-worker-existing-clusterrole-binding
+# subjects:
+# - kind: ServiceAccount
+#   name: airflow-worker
+#   namespace: airflow
+# roleRef:
+#   kind: ClusterRole
+#   name: your-existing-clusterrole-name  # Reference existing clusterrole
+#   apiGroup: rbac.authorization.k8s.io
