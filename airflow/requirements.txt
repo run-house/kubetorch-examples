@@ -1,0 +1,1 @@
+https://auth.run.house/v1/package/kubetorch-<KT_VERSION>-py3-none-any.whl?license_key=<KT_LICENSE_KEY>&api_key=<KT_API_KEY>
