@@ -12,11 +12,10 @@
 #
 # This approach is more flexible than using a launcher or any other system to launch the distributed training.
 # First, each iteration loop after the first execution becomes instanteous, with hot-reloading and warm compute
-# allowing for local-like iteration on distributed remote compute. Additionally, you can run this identically
-# from anywhere, whether checked out from an intern laptop or from within an orchestrator node.
-# It's also significantly easier to debug and monitor, as you can see the output of
-# each rank in real-time, get stack traces if a worker fails (with logs streaming back), and use
-# the built-in PDB debugger to debug.
+# allowing for local-like iteration on distributed remote compute. Second, it's significantly easier to debug and monitor,
+# the workload, as you can see the output of each rank in real-time, get stack traces if a worker fails (with logs streaming
+# back), and use the built-in PDB debugger to debug. Finally, the code is already production ready and perfectly reproducible;
+# it will run identically from anywhere, whether checked out from an intern laptop, in CI, or in an orchestrator node.
 
 
 import argparse
