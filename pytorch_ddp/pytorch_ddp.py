@@ -5,7 +5,7 @@
 #
 # Often distributed training is launched from multiple parallel CLI commands(`python -m torch.distributed.launch ...`),
 # each spawning separate training processes (ranks). Instead, here we are calling `.to()` with Kubetorch to dispatch
-# our training entrypoint to remote compute, and then calling `.distribute("pytorch", workers=4) to create
+# our training entrypoint to remote compute, and then calling `.distribute("pytorch", workers=4)` to create
 # 4 replicas and setting up environment variables necessary for PyTorch communication. The replicas concurrently
 # to trigger coordinated multi-node training (`torch.distributed.init_process_group` causes each to wait for all to connect,
 # and sets up the distributed communication). We're using 4 x 1 GPU instances (and therefore four ranks).
