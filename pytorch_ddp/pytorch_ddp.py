@@ -3,6 +3,8 @@
 # multiple GPUs. Kubetorch is not solely for PyTorch training (supporting arbitrary code & distribution frameworks),
 # but it is a common use case.
 #
+# ::youtube[Introducing Kubetorch]{url="https://www.youtube.com/watch?v=5nRRaxZJnUg"}
+#
 # Often distributed training is launched from multiple parallel CLI commands(`python -m torch.distributed.launch ...`),
 # each spawning separate training processes (ranks). Instead, here we are calling `.to()` with Kubetorch to dispatch
 # our training entrypoint to remote compute, and then calling `.distribute("pytorch", workers=4)` to create
