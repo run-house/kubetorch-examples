@@ -3,13 +3,13 @@
 This example demonstrates how to use Airflow with Kubetorch to dispatch
 the work of training a basic Torch model to a remote GPU. We'll walk through a **simple training pipeline** that uses the MNIST dataset and PyTorch.
 
-Beyond standard classes and methods for our training pipeline, you'll see that we only need minimal code in the form of task callables to utilize Kubetorch dispatching from Airflow. The same structure can be used to improve development velocity, research-to-production, and fault tolerance with any pipeline orchestrator (e.g. Argo, Dagster, Prefect, Metaflow) without requiring any direct integration.
+Beyond standard classes and methods for our training pipeline, you'll see that we only need minimal code in the form of task callables to utilize Kubetorch dispatching from Airflow. The same structure can be used to improve development velocity, research-to-production, and fault tolerance with any pipeline orchestrator (e.g. Argo, Dagster, Prefect, Flyte) without requiring any direct integration.
 
 To test this out for yourself, visit the [Kubetorch Examples](https://github.com/run-house/kubetorch-examples/tree/main/airflow) repository on Github. With minor adjustments, you should be able to deploy the DAG to your own Airflow installation on Kubernetes.
 
 ## Kubetorch + Airflow
 
-[Apache Airflow](https://airflow.apache.org/) is widely used in ML, but it comes with plenty of problems, especially when it comes to debugging workflows and translating between research and production. **Kubetorch** enables fast and efficient ML development right inside of your Kubernetes cluster and can be deployed as-is inside of your Airflow pipelines, closing the research-to-production gap. You can learn more about Kubetorch in our [documentation](https://www.run.house/kubetorch/introduction).
+[Apache Airflow](https://airflow.apache.org/) is widely used in ML, but it comes with plenty of problems, especially when it comes to debugging workflows and translating between research and production. **Kubetorch** enables fast and efficient ML development right inside your Kubernetes cluster and can be deployed as-is in your Airflow pipelines, closing the research-to-production gap. You can learn more about Kubetorch in our [documentation](https://www.run.house/kubetorch/introduction).
 
 ### Example Usage Pattern
 
