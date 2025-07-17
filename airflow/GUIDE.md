@@ -3,20 +3,20 @@
 This example demonstrates how to use Airflow with Kubetorch to dispatch
 the work of training a basic Torch model to a remote GPU. We'll walk through a **simple training pipeline** that uses the MNIST dataset and PyTorch.
 
-Beyond standard classes and methods for our training pipeline, you'll see that we only need minimal code in the form of task callables to utilize Kubetorch dispatching from Airflow (or any other orchestrator). [Maybe a quick list to catch attention = TK]
+Beyond standard classes and methods for our training pipeline, you'll see that we only need minimal code in the form of task callables to utilize Kubetorch dispatching from Airflow. Kubetorch is designed to work with any orchestrator, including Argo, Dagster, Prefect, and Metaflow.
 
 To test this out for yourself, visit the [Kubetorch Examples](https://github.com/run-house/kubetorch-examples/tree/main/airflow) repository on Github. With minor adjustments, you should be able to deploy the DAG to your own Airflow installation on Kubernetes.
 
 ## Kubetorch + Airflow
 
-Airflow is incredibly popular and widely used, but it comes with plenty of problems, especially when it comes to debugging workflows and translating between research and production. **Kubetorch** enables fast and efficient ML development right inside of your Kubernetes cluster, making it a perfect tool for your Airflow pipelines. You can learn more about Kubetorch in our [documentation](https://www.run.house/kubetorch/introduction).
+[Apache Airflow](https://airflow.apache.org/) is widely used in ML, but it comes with plenty of problems, especially when it comes to debugging workflows and translating between research and production. **Kubetorch** enables fast and efficient ML development right inside of your Kubernetes cluster, making it a perfect tool for your Airflow pipelines. You can learn more about Kubetorch in our [documentation](https://www.run.house/kubetorch/introduction).
 
 ### Example Usage Pattern
 
 1. **Write Python classes and functions** using normal, ordinary coding best practices. Do not think about DAGs or DSLs at all.
 2. **Send the code for remote execution with Kubetorch**, and figure out whether the code works by debugging it interactively. Kubetorch lets you send the code in seconds and streams logs back. _You can work on remote as if it were local_.
 3. Once you are satisfied with your code, **write the callables for Airflow tasks**. The Airflow DAG definition contains _minimal code_ to call out to already working Classes and Functions, detailing the order of the tasks. You can even create one-step DAG, leveraging Airflow purely for scheduling and observability.
-4. **Easily iterate further** on your code, or test the pipeline end-to-end from local with no Airflow participation
+4. **Easily iterate further** on your code, or test the pipeline end-to-end from local with no Airflow participation.
 
 ### Benefits of Using Kubetorch
 
