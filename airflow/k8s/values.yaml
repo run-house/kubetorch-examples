@@ -1,0 +1,37 @@
+# Use Airflow 3.0.2
+config:
+  webserver:
+    secret_key: "your-secret-webserver-key"
+  core:
+    fernet_key: "your-secret-fernet-key"
+
+# Disable auto-generation of secrets
+fernetKey: "your-secret-fernet-key"
+webserverSecretKey: "your-secret-webserver-key"
+
+images:
+  airflow:
+    repository: 172657097474.dkr.ecr.us-east-1.amazonaws.com/kt-airflow-custom
+    tag: "latest"
+    pullPolicy: Always
+
+postgresql:
+  primary:
+    persistence:
+      storageClass: gp2
+
+redis:
+  persistence:
+    storageClassName: gp2
+
+# For worker and triggerer StatefulSets
+workers:
+  persistence:
+    storageClassName: gp2
+
+triggerer:
+  persistence:
+    storageClassName: gp2
+
+persistence:
+  storageClass: gp2
