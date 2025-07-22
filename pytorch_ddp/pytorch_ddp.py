@@ -10,7 +10,8 @@
 # our training entrypoint to remote compute, and then calling `.distribute("pytorch", workers=4)` to create
 # 4 replicas and setting up environment variables necessary for PyTorch communication. The replicas concurrently
 # to trigger coordinated multi-node training (`torch.distributed.init_process_group` causes each to wait for all to connect,
-# and sets up the distributed communication). We're using 4 x 1 GPU instances (and therefore four ranks).
+# and sets up the distributed communication). We're using 4 x 1 GPU instances (and therefore four ranks) to illustrate
+# how easy it is to do multi-node, though at this scale you can obviously use a single node.
 #
 # This approach is more flexible than using a launcher or any other system to launch the distributed training.
 # First, each iteration loop after the first execution becomes instanteous, with hot-reloading and warm compute
@@ -19,14 +20,12 @@
 # back), and use the built-in PDB debugger to debug. Finally, the code is already production ready and perfectly reproducible;
 # it will run identically from anywhere, whether checked out from an intern laptop, in CI, or in an orchestrator node.
 
-
 import argparse
 import time
 
 import kubetorch as kt
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
-
 
 # ## Define the PyTorch Distributed training logic
 # This is a dummy training function, but you can think of this function as representative of your training entrypoint function,

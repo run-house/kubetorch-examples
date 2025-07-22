@@ -4,19 +4,22 @@
 # deploy the service, and then you can run `python llama.py` to see how you can call the remote service from
 # your local machine.
 
-import kubetorch as kt
-
-
 # ### Decorate a Regular Inference Class
 # We start with a regular inference class called `LlamaModel` which has a `generate()` method that runs inference with vLLM.
-# Then, we apply our decorators which will allow this service to be deployed with `kt deploy.` In the `kt.compute` decorator,
-# we request 1 GPU for each replica of the inference class; our cluster is configured with an L4, but you can easily
+# Then, we apply our decorators which will allow this service to be deployed with `kt deploy.`
+#
+# In the `kt.compute` decorator, we request 1 GPU for each replica of the inference class; our cluster is configured with an L4, but you can easily
 # specify the exact compute requirements here, including a specific GPU type, CPU, memory, etc. We also specify that we want
 # it to start with a public PyTorch image with vllm installed additionally; you can launch the service with your team's base
 # Docker image, but optionally (especially during development iteration) lightly modify that image without having to rebuild
-# that image fully. We also use the `kt.autoscale` decorator to specify the autoscale conditions for this service ; this service will
+# that image fully.
+#
+# We also use the `kt.autoscale` decorator to specify the autoscale conditions for this service ; this service will
 # scale to 0, have a maximum scale of 5, and autoscale up when there are 100 concurrent requests. There are many more
 # flexible options you have here as well.
+import kubetorch as kt
+
+
 @kt.compute(
     gpus="1",
     image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3").run_bash(
