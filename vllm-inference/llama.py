@@ -1,10 +1,12 @@
-# ## Hello World: Deploy an LLM Inference Service
-# Our inference `Hello, World` has you deploying an open LLM (Llama 3 in this case) to 1 or more GPUs in the cloud,
-# using vLLM to serve the model due to it's high performance. All you have to do is call `kt deploy llama.py` to
-# deploy the service, and then you can run `python llama.py` to see how you can call the remote service from
-# your local machine.
-
-# ### Decorate a Regular Inference Class
+# # Hello World: Deploy an LLM Inference Service
+# This inference _Hello, World_ example walks through deploying an open LLM (Llama 3) to one or more GPUs in the cloud.
+# We'll use [vLLM](https://github.com/vllm-project/vllm) to serve the model due to it's high performance.
+# To deploy the service to your cloud, you'll can simply run `kt deploy llama.py`, and then you can run `python llama.py`
+# to see how you can call the remote service from your local machine.
+#
+# ::youtube[Llama Inference with vLLM]{url="https://www.youtube.com/watch?v=8slAR7459X4"}
+#
+# ## Decorate a Regular Inference Class
 # We start with a regular inference class called `LlamaModel` which has a `generate()` method that runs inference with vLLM.
 # Then, we apply our decorators which will allow this service to be deployed with `kt deploy.`
 #
@@ -17,6 +19,7 @@
 # We also use the `kt.autoscale` decorator to specify the autoscale conditions for this service ; this service will
 # scale to 0, have a maximum scale of 5, and autoscale up when there are 100 concurrent requests. There are many more
 # flexible options you have here as well.
+
 import kubetorch as kt
 
 
@@ -58,11 +61,17 @@ class LlamaModel:
         return [output.outputs[0].text for output in req_output]
 
 
-# ### Call the Inference
+# ## Call the Inference
 # Once we call `kt deploy llama.py,` an autoscaling service is stood up that we can use directly in our programs.
 # We are calling the service in our script here, but you could identically call the service from within your FastAPI app,
 # an orchestrator for batch inference, or anywhere else.
-if __name__ == "__main__":
+
+
+def run_inference():
     # LlamaModel.deploy() # Uncomment to test the LlamaModel service locally.
     res = LlamaModel.generate(["Who is Randy Jackson?"], max_tokens=100)
     print(res)
+
+
+if __name__ == "__main__":
+    run_inference()

@@ -1,4 +1,5 @@
 # # Launch DeepSeek-R1 on Your Own Cloud Account
+#
 # The Llama-70B distill of DeepSeek R1 is the most powerful and largest of the
 # DeepSeek distills, but still easily fits on a single node of GPUs - even 8 x L4s with minor optimizations.
 # Of course, inference speed will improve if you change to A100s or H100s on your cloud provider,
@@ -15,17 +16,16 @@
 # We can easily add additional nodes, which will automatically form the compute. We will
 # rely fully on vllm to make use of them and increasing tensor and pipeline parallelism.
 #
-import os
-
 # ## Defining the vLLM Inference Class
 # We define a class that will hold the model and allow us to send prompts to it.
 # This is regular, undecorated Python code, that implements methods to
 # load the model (automatically downloading from HuggingFace), and to generate text from a prompt.
 
+import os
+
 import kubetorch as kt
 from vllm import LLM, SamplingParams
 
-# Define the image and compute
 img = kt.Image(image_id="vllm/vllm-openai:latest").sync_secrets(["huggingface"])
 
 
