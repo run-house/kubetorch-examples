@@ -32,22 +32,29 @@ import kubetorch as kt
     launch_timeout=1200,  # Need more time to load the model
     secrets=["huggingface"],
 )
-@kt.autoscale(initial_scale=1, min_scale=0, max_scale=5, concurrency=100)
+@kt.autoscale(initial_scale=1, min_scale=1, max_scale=5, concurrency=100)
 class LlamaModel:
     def __init__(self, model_id="meta-llama/Meta-Llama-3-8B-Instruct"):
+        self.model = None
+        self.model_id = model_id
+
+    def load_model(self):
         from vllm import LLM
 
         self.model = LLM(
-            model_id,
+            self.model_id,
             dtype="bfloat16",
             trust_remote_code=True,
-            max_model_len=8192,  # Reduces size of KV store
+            max_model_len=2048,  # Reduces size of KV store
             enforce_eager=True,
         )
 
     def generate(
         self, queries, temperature=0.65, top_p=0.95, max_tokens=5120, min_tokens=32
     ):
+        if self.model is None:
+            self.load_model()
+
         from vllm import SamplingParams
 
         sampling_params = SamplingParams(

@@ -193,7 +193,7 @@ if __name__ == "__main__":
 
     # How we would run in parallel by calling the remote service in parallel via threads
     files_list = [f"file{i}" for i in range(1, 100)]  # Your inference inputs
-    with ThreadPoolExecutor(max_workers=1) as executor:
+    with ThreadPoolExecutor(max_workers=5) as executor:
         results = executor.map(inference_thread, files_list)
 
     print(list(results))
