@@ -1,5 +1,10 @@
 # # Offline Batch Inference
-# We will use BGE to embed a large amount of text.
+# We will use BGE to embed a large amount of text. We start with a regular class
+# that defines a few methods to load, tokenize, and embed the datasets. Then, we take this class
+# and dispatch it to remote compute as an autoscaling service, and call that service in parallel
+# across a few threads to process our data. In practice, you'd want to re-implement the load_data()
+# and save_embeddings() methods; we use a public dataset from HuggingFace for convenience.
+
 import kubetorch as kt
 
 
@@ -75,8 +80,12 @@ class BGEEmbedder:
         pass
 
 
-# ## Defining compute and the launching embeddings service
-# Here, we will create an autoscaling service that
+# ## Defining Compute and Launching the Service
+# Here, we will create an autoscaling service, where each replica runs on 1 GPU + 7 CPUs. Then,
+# we define it such that each replica has a concurrency of 1 (processes 1 file at a time), and set
+# a min / max scale limit for the number of files we run in parallel. In other inference examples, we show a decorator pattern
+# but in this example, we will dispatch the embedding using the regular `.to()` since we may want the deployment
+# of this embedder service to exist within a pipeline proper.
 if __name__ == "__main__":
 
     replicas = 4
@@ -89,13 +98,13 @@ if __name__ == "__main__":
         .pip_install(["vllm"])
         .run_bash(["pip uninstall pyarrow -y", "pip install pyarrow datasets"]),
         launch_timeout=600,
-        inactivity_ttl="2h",
         concurrency=1,
     ).autoscale(min_scale=0, max_scale=replicas)
 
     embedder = kt.cls(BGEEmbedder).to(compute)
     embedder.load_model()
 
+    # Illustrative; you'd manage this elsewhere.
     data_files_list = [
         "20231101.en/train-00000-of-00041.parquet",
         "20231101.en/train-00001-of-00041.parquet",
@@ -105,6 +114,7 @@ if __name__ == "__main__":
         "20231101.en/train-00005-of-00041.parquet",
     ]  # ETC
 
+    # Launch parallel threads to call the service N times (one per replica)
     from concurrent.futures import ThreadPoolExecutor
     from functools import partial
 
