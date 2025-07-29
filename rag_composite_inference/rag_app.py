@@ -1,4 +1,4 @@
-# ## RAG App with Vector Embedding and LLM Generation
+# # RAG App with Vector Embedding and LLM Generation
 #
 # This example defines a retrieval augmented generation (RAG) app that references text from websites
 # to enrich the response from an LLM. Depending on the URLs you use to populate the vector database,
