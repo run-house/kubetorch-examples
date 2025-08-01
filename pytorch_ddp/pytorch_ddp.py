@@ -90,7 +90,7 @@ def main():
         gpus=1,
         image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3"),
         launch_timeout=600,
-        inactivity_ttl="4h",
+        inactivity_ttl="1h",
     ).distribute("pytorch", workers=4)
     train_ddp = kt.fn(train).to(gpus)
 

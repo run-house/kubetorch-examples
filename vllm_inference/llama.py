@@ -32,7 +32,7 @@ import kubetorch as kt
     launch_timeout=1200,  # Need more time to load the model
     secrets=["huggingface"],
 )
-@kt.autoscale(initial_scale=1, min_scale=1, max_scale=5, concurrency=100)
+@kt.autoscale(initial_scale=1, min_scale=0, max_scale=5, concurrency=100)
 class LlamaModel:
     def __init__(self, model_id="meta-llama/Meta-Llama-3-8B-Instruct"):
         self.model = None
