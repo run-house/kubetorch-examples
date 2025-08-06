@@ -1,4 +1,4 @@
-# # Deploy OpenAI OSS Inference Service
+# # Deploy OpenAI GPT OSS 120B as an Inference Service
 # This inference example walks through deploying OpenAI's new open LLM (120B) to 8 GPUs in the cloud.
 # We'll use [Transformers' AutoModel](https://huggingface.co/transformers/v3.0.2/model_doc/auto.html)
 # to serve the model due to the simplicity of deploying the model across multiple GPUs.
