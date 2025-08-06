@@ -26,21 +26,25 @@ import kubetorch as kt
 @kt.compute(
     gpus="1",
     image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3").run_bash(
-        "uv pip install --system --break-system-packages vllm==0.9.0"
+        "uv pip install --system --break-system-packages --no-build-isolation flash-attn==2.7.3 vllm==0.9.0 'transformers<4.54.0'"
     ),
     shared_memory_limit="2Gi",  # Recommended by vLLM: https://docs.vllm.ai/en/v0.6.4/serving/deploying_with_k8s.html
     launch_timeout=1200,  # Need more time to load the model
     secrets=["huggingface"],
 )
-@kt.autoscale(initial_scale=1, min_scale=0, max_scale=5, concurrency=100)
+@kt.autoscale(
+    initial_scale=1,
+    min_scale=1,
+    max_scale=5,
+    concurrency=100,
+    scale_to_zero_grace_period=300,
+)
 class LlamaModel:
     def __init__(self, model_id="meta-llama/Meta-Llama-3-8B-Instruct"):
-        self.model = None
-        self.model_id = model_id
-
-    def load_model(self):
         from vllm import LLM
 
+        print("Loading model in vLLM:", model_id)
+        self.model_id = model_id
         self.model = LLM(
             self.model_id,
             dtype="bfloat16",
@@ -52,9 +56,6 @@ class LlamaModel:
     def generate(
         self, queries, temperature=0.65, top_p=0.95, max_tokens=5120, min_tokens=32
     ):
-        if self.model is None:
-            self.load_model()
-
         from vllm import SamplingParams
 
         sampling_params = SamplingParams(
