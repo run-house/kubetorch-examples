@@ -9,27 +9,29 @@
 #
 # On benchmarks, this Llama70B distillation meets or exceeds the performance of GPT-4o-0513,
 # Claude-3.5-Sonnet-1022, and o1-mini across most quantitative and coding tasks. Real world
-# quality of output depends on your use case. This will run the model at ~20 tokens a second,
-# which means it takes 1-5 minutes per question asked. It will take some time to download the model
-# to the remote machine on the first run.
+# quality of output depends on your use case. It will take some time to download the model
+# to the remote machine on the first run. Further iterations will take no time at all.
 #
-# We can easily add additional nodes, which will automatically form the compute. We will
-# rely fully on vllm to make use of them and increasing tensor and pipeline parallelism.
-#
-# ## Defining the vLLM Inference Class
-# We define a class that will hold the model and allow us to send prompts to it.
-# This is regular, undecorated Python code, that implements methods to
-# load the model (automatically downloading from HuggingFace), and to generate text from a prompt.
-
+# To deploy the service, simply call `kt deploy deepseek_llama_70b.py` on this file and
+# we create a proper Kubernetes service with scale to zero and autoscaling for concurrency.
+# Then, you can import and use this class as is, which we show below in the main function.
 import os
 
 import kubetorch as kt
 from vllm import LLM, SamplingParams
 
+# ## Launch Compute and Create Service
+# We will define compute using Kubetorch and send our inference class to the remote compute.
+# First, we define an image with torch and vllm and 8 x L4 with 1 node.
+# Then, we send our inference class to the remote compute and instantiate a the remote inference class
+# with the name `deepseek` which we can access by name below, or from any other
+# Python process which imports DeepSeekDistillLlama70BvLLM. This also creates a proper service
+# in Kubernetes that you can call over HTTP.
 img = kt.Image(image_id="vllm/vllm-openai:latest").sync_secrets(["huggingface"])
 
 
 @kt.compute(gpus="8", gpu_type="L4", image=img, name="deepseek_llama")
+@kt.autoscale(initial_scale=1, min_scale=0, max_scale=5, concurrency=100)
 class DeepSeekDistillLlama70BvLLM:
     def __init__(self, model_id="deepseek-ai/DeepSeek-R1-Distill-Llama-70B"):
         self.model_id = model_id
@@ -63,13 +65,10 @@ class DeepSeekDistillLlama70BvLLM:
         return outputs
 
 
-# ## Launch Compute and Run Inference
-# Now we will define compute using Kubetorch and send our inference class to the remote compute.
-# First, we define an image with torch and vllm and 8 x L4 with 1 node.
-# Then, we send our inference class to the remote compute and instantiate a the remote inference class
-# with the name `deepseek` which we can access by name later. Finally, we call the remote inference class
-# as if it were local to generate text from a list of prompts and print the results. If you launch with multiple nodes
-# you can take advantage of vllm's parallelism.
+# ## Call the Inference
+# Once we call `kt deploy llama.py,` an autoscaling service is stood up that we can use directly in our programs.
+# We are calling the service in our script here, but you could identically call the service from within your FastAPI app,
+# an orchestrator for batch inference, or anywhere else.
 
 if __name__ == "__main__":
     # Run inference remotely and print the results
