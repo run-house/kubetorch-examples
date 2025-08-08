@@ -17,6 +17,7 @@
 # being stood up on the fly and called out to to generate results. You can stand up
 # arbitrarily complex agents with entirely different image/compute requirements there.
 
+
 import asyncio
 import base64
 import json
@@ -115,6 +116,7 @@ class TRLCodeSandboxTrainer:
         self.model_name = config.pop("model_name")
         self.grpo_config = GRPOConfig(**config)
         self.agent = self.launch_sandbox()
+        self.dataset = None
 
         # Create reward function for GRPO
         def grpo_reward_function(prompts, completions, **kwargs):
@@ -147,7 +149,7 @@ class TRLCodeSandboxTrainer:
         cpus = kt.Compute(
             cpus="0.5",
             image=kt.Image().pip_install(["swe-rex", "numpy", "pandas"]),
-        )
+        ).autoscale(min_scale=1, max_scale=5)
 
         return kt.cls(CodeAgent).to(cpus, get_if_exists=True)
 
