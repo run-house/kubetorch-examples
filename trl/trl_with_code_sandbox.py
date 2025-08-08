@@ -45,7 +45,7 @@ class CodeSandboxTask:
 class CodeAgent:
     """Code execution environment using swe-rex for sandboxed execution"""
 
-    def __init__(self, name: str = "trl-sandbox"):
+    def __init__(self):
         self.runtime = None
         self._current_tasks = None
         try:
