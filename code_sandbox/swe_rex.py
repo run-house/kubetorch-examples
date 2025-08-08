@@ -16,6 +16,7 @@ def get_sandbox(name: str):
 
 if __name__ == "__main__":
     sandbox = get_sandbox("swe-rex-sandbox-1")
+
     # Check if the runtime is alive
     is_alive_response = sandbox.is_alive()
     print(f"Is the runtime alive? {is_alive_response.is_alive}")
