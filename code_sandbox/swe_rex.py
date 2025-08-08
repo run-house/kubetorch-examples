@@ -16,11 +16,16 @@ def get_sandbox(name: str):
 
 if __name__ == "__main__":
     sandbox = get_sandbox("swe-rex-sandbox-1")
+
+    # Check if the runtime is alive
     is_alive_response = sandbox.is_alive()
-    print(f"Runtime started.")
+    print(f"Is the runtime alive? {is_alive_response.is_alive}")
 
-    echo_response = sandbox.execute(Command(command="echo 'Hello, Swerex!'", shell=True))
+    # echo a message to the runtime
+    echo_response = sandbox.execute(
+        Command(command="echo 'Hello, Swerex!'", shell=True)
+    )
 
-    close_response = sandbox.teardown()
+    # Close the runtime when done
+    close_response = sandbox.close()
     print("Runtime closed.")
-

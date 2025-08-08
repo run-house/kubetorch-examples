@@ -1,15 +1,32 @@
-import base64
+# # RL with TRL and SWE-REX Code Sandbox
+# In this example, we will show you how simple it is to launch an RL training
+# while dispatching execution to a code sandbox (running on separate compute)
+# from within the trainer program.
+#
+# There are three main components here:
+# * A code agent class, which will run code and return stdout/err + success/fail
+# * A training encapsulation class that launches the code agent on 0.5 CPUs on separate
+# compute on the same Kubernetes cluster, instantiates a TRL trainer, loads data (dummy),
+# and then runs the training.
+# * Our main, which sends our trainer to GPUs on Kubernetes, instantiates it
+# there with specific configs (here, hardcoded; but you should use a config system).
+#
+# An important thing to note is that this CodeAgent runs on its own compute and
+# image, can be called in parallel across many threads, and made to be autoscaling.
+# This is not a subprocess within the pod that runs our TRL training, but a service
+# being stood up on the fly and called out to to generate results. You can stand up
+# arbitrarily complex agents with entirely different image/compute requirements there.
 
+
+import asyncio
+import base64
 import json
 import logging
 from dataclasses import dataclass
 from typing import Dict, Optional
 
 import kubetorch as kt
-from datasets import Dataset
 from swerex.runtime.local import Command, LocalRuntime
-
-from trl import GRPOConfig, GRPOTrainer
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -25,39 +42,24 @@ class CodeSandboxTask:
     max_execution_time: int = 30
 
 
-class CodeSandboxEnvironment:
+class CodeAgent:
     """Code execution environment using swe-rex for sandboxed execution"""
 
-    def __init__(self, name: str = "trl-sandbox", get_if_exists=True):
-        self.name = name
+    def __init__(self):
         self.runtime = None
-        self.dataset = None
         self._current_tasks = None
         try:
-            cpus = kt.Compute(
-                cpus="0.5",
-                image=kt.Image().pip_install(["swe-rex", "numpy", "pandas"]),
-                allowed_serialization=["pickle"],
-            )
-            self.runtime = kt.cls(LocalRuntime, name=self.name).to(
-                cpus, get_if_exists=get_if_exists
-            )
-            self.runtime.serialization = "pickle"
+            self.runtime = LocalRuntime()
 
-            if not self.runtime.is_alive().is_alive:
-                raise RuntimeError("Failed to initialize sandbox")
-
-            logger.info(f"Code sandbox '{self.name}' initialized successfully")
+            logger.info("Code sandbox initialized successfully")
         except Exception as e:
             logger.error(f"Failed to setup sandbox: {e}")
             raise
 
     def execute_code(self, code: str, timeout: int = 30) -> Dict:
         """Execute Python code in the sandbox environment."""
-
+        encoded_code = base64.b64encode(code.encode()).decode()
         try:
-            encoded_code = base64.b64encode(code.encode()).decode()
-
             wrapper_script = f"""
 import sys, io, json, traceback, base64
 from contextlib import redirect_stdout, redirect_stderr
@@ -84,11 +86,14 @@ except Exception as e:
 
 print(json.dumps(result))
 """
-            response = self.runtime.execute(
-                Command(
-                    command=["python3", "-c", wrapper_script],
-                    shell=False,
-                    timeout=timeout,
+
+            response = asyncio.run(
+                self.runtime.execute(
+                    Command(
+                        command=["python3", "-c", wrapper_script],
+                        shell=False,
+                        timeout=timeout,
+                    )
                 )
             )
             return json.loads(response.stdout.strip())
@@ -102,38 +107,74 @@ print(json.dumps(result))
             }
 
 
-class CodeRewardFunction:
-    """Reward function for evaluating generated code"""
+class TRLCodeSandboxTrainer:
+    """Main trainer class for GRPO RL fine-tuning with code sandbox"""
 
-    def __init__(self, sandbox: CodeSandboxEnvironment):
-        self.sandbox = sandbox
+    def __init__(self, **config):
+        from trl import GRPOConfig, GRPOTrainer
 
-    def calculate_reward(self, task: CodeSandboxTask, generated_code: str) -> float:
+        self.model_name = config.pop("model_name")
+        self.grpo_config = GRPOConfig(**config)
+        self.agent = self.launch_sandbox()
+        self.dataset = None
+
+        # Create reward function for GRPO
+        def grpo_reward_function(prompts, completions, **kwargs):
+            rewards = []
+            for prompt, completion in zip(prompts, completions):
+                task_text = prompt.replace("# Task: ", "").replace(
+                    "\n# Solution:\n", ""
+                )
+                task = next(
+                    task for task in self._current_tasks if task.prompt == task_text
+                )
+                result = self.agent.execute_code(completion)
+                eval = self.agent.execute_code(f"{completion}\n\n{task.test_code}")
+                reward = self.calculate_reward(task, result, eval)
+                rewards.append(reward)
+
+            return rewards
+
+        # Initialize GRPO trainer with proper parameters
+        self.grpo_trainer = GRPOTrainer(
+            model=self.model_name,
+            reward_funcs=grpo_reward_function,
+            args=self.grpo_config,
+        )
+
+        logger.info("TRL GRPO components initialized successfully")
+
+    def launch_sandbox(self):
+        """Start a CodeAgent to run Python in SWE REX sandbox"""
+        cpus = kt.Compute(
+            cpus="0.5",
+            image=kt.Image().pip_install(["swe-rex", "numpy", "pandas"]),
+        ).autoscale(min_scale=1, max_scale=5)
+
+        return kt.cls(CodeAgent).to(cpus, get_if_exists=True)
+
+    def calculate_reward(
+        self, task: CodeSandboxTask, result: dict, test_result: dict = None
+    ) -> float:
         """Calculate reward based on code execution results"""
         # Execute the generated code
-        result = self.sandbox.execute_code(generated_code)
         reward = 0.0
 
         # Base reward for successful execution
         if result["success"]:
             reward += 0.5
 
-            # Additional reward for correct output
+            # Additional reward for correct output and clean execution
             if (
                 task.expected_output
                 and task.expected_output.strip() in result["stdout"]
             ):
                 reward += 0.3
-
-            # Reward for clean execution (no errors in stderr)
             if not result["stderr"].strip():
                 reward += 0.1
 
-            # Run additional test if provided
-            if task.test_code:
-                test_result = self.sandbox.execute_code(
-                    f"{generated_code}\n{task.test_code}"
-                )
+            # Evaluate based on test results, if provided
+            if test_result:
                 if (
                     task.expected_output
                     and task.expected_output.strip() in test_result["stdout"]
@@ -149,41 +190,6 @@ class CodeRewardFunction:
 
         # Normalize reward to [-1, 1]
         return max(-1.0, min(1.0, reward))
-
-
-class TRLCodeSandboxTrainer:
-    """Main trainer class for GRPO RL fine-tuning with code sandbox"""
-
-    def __init__(self, **config):
-        self.model_name = config.pop("model_name")
-        self.grpo_config = GRPOConfig(**config)
-        self.grpo_trainer = None
-        self.sandbox = CodeSandboxEnvironment()
-        self.reward_fn = CodeRewardFunction(self.sandbox)
-
-        # Create reward function for GRPO
-        def grpo_reward_function(prompts, completions, **kwargs):
-            rewards = []
-            for prompt, completion in zip(prompts, completions):
-                task_text = prompt.replace("# Task: ", "").replace(
-                    "\n# Solution:\n", ""
-                )
-                task = next(
-                    task for task in self._current_tasks if task.prompt == task_text
-                )
-                reward = self.reward_fn.calculate_reward(task, completion)
-                rewards.append(reward)
-
-            return rewards
-
-        # Initialize GRPO trainer with proper parameters
-        self.grpo_trainer = GRPOTrainer(
-            model=self.model_name,
-            reward_funcs=grpo_reward_function,
-            args=self.grpo_config,
-        )
-
-        logger.info("TRL GRPO components initialized successfully")
 
     def train_epoch(self, num_steps: int = 100):
         """Train one epoch with GRPO"""
@@ -203,6 +209,8 @@ class TRLCodeSandboxTrainer:
 
     def load_dataset(self):
         """Dummy method for creating sample coding tasks for training"""
+        from datasets import Dataset
+
         self._current_tasks = [
             CodeSandboxTask(
                 prompt="Write a function to calculate the factorial of a number",
