@@ -1,0 +1,8 @@
+datasets
+trl
+transformers
+torch
+accelerate
+peft
+rich
+swe-rex
