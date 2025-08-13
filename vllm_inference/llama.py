@@ -37,7 +37,6 @@ import kubetorch as kt
     min_scale=1,
     max_scale=5,
     concurrency=100,
-    scale_to_zero_grace_period=300,
 )
 class LlamaModel:
     def __init__(self, model_id="meta-llama/Meta-Llama-3-8B-Instruct"):
