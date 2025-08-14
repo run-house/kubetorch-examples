@@ -204,10 +204,10 @@ if __name__ == "__main__":
 
     gpu = kt.Compute(
         gpus="1",
-        memory="50Gi",
+        memory="24Gi",
         image=img,
         launch_timeout="1200",
-    ).autoscale(min_replicas=1, scale_to_zero_grace_period=40)
+    )
 
     # Finally, we define our module and run it on the remote gpu. We construct it normally and then call
     # `to` to run it on the remote compute.

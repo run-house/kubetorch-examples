@@ -1,4 +1,4 @@
-# # RL with TRL and SWE-REX Code Sandbox
+# # RL with TRL and SWE-ReX Code Sandbox
 # In this example, we will show you how simple it is to launch an RL training
 # while dispatching execution to a code sandbox (running on separate compute)
 # from within the trainer program.
@@ -42,8 +42,15 @@ class CodeSandboxTask:
     max_execution_time: int = 30
 
 
+# ## Agent Class
+# This class is responsible for executing code in a sandboxed environment using SWE-ReX.
+# More generically, this can be any agent that takes inputs and executes some actions.
+# We will stand up the CodeAgent as a separate service from within the TRL trainer, and the
+# code execution agent / service will run on different compute with its own image,
+# resource requirements, and even autoscaling in the case you are calling the agent
+# multiple times for larger batches of inferences or distributed training.
 class CodeAgent:
-    """Code execution environment using swe-rex for sandboxed execution"""
+    """Code execution environment using SWE-ReX for sandboxed execution"""
 
     def __init__(self):
         self.runtime = None
@@ -107,6 +114,11 @@ print(json.dumps(result))
             }
 
 
+# ## Trainer Class
+# In this class, we define a reward function that calls into the CodeAgent service
+# to execute and then evaluates against a baseline. That function is fed into the GRPOTrainer
+# from the TRL library, which handles the RL training loop, along with a base model and some
+# training configs.
 class TRLCodeSandboxTrainer:
     """Main trainer class for GRPO RL fine-tuning with code sandbox"""
 
@@ -248,6 +260,13 @@ class TRLCodeSandboxTrainer:
         logger.info(f"Loaded dataset with {len(self.dataset)} prompts")
 
 
+# ## Launch the Training
+# Running from local or CI or anywhere that runs Python, you can launch the TRL
+# training by defining the compute and image you want to use, and then using
+# `.to()` to send the `TRLCodeSandboxTrainer` to that compute. We hardcode a few
+# configs here for simplicity.
+
+
 def main(grpo_cfg, epochs):
     """Main training function to run locally"""
     logger.info("Starting TRL GRPO Code Sandbox training...")
@@ -292,8 +311,6 @@ def main(grpo_cfg, epochs):
 
 
 if __name__ == "__main__":
-
-    # Configs directly coded here for visibility
     grpo_cfg = {
         "model_name": "Qwen/Qwen2.5-1.5B-Instruct",
         "per_device_train_batch_size": 2,

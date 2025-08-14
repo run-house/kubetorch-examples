@@ -1,0 +1,65 @@
+algorithm:
+  adv_estimator: grpo
+  use_kl_in_reward: false
+
+data:
+  hf_data_name: openai/gsm8k
+  train_files: /data/gsm8k/train.parquet
+  val_files: /data/gsm8k/test.parquet
+  train_batch_size: 64
+  max_prompt_length: 512
+  max_response_length: 1024
+  filter_overlong_prompts: true
+  truncation: error
+  image_key: images
+
+actor_rollout_ref:
+  model:
+    hf_model_name: Qwen/Qwen2.5-0.5B-Instruct
+    path: Qwen/Qwen2.5-0.5B-Instruct
+    use_remove_padding: true
+    lora_rank: 64
+    lora_alpha: 32
+    target_modules: all-linear
+    exclude_modules: '.*visual.*'
+    enable_gradient_checkpointing: true
+
+  actor:
+    optim:
+      lr: 3e-6
+    ppo_mini_batch_size: 64
+    ppo_micro_batch_size_per_gpu: 4
+    use_kl_loss: true
+    kl_loss_coef: 0.01
+    kl_loss_type: low_var_kl
+    entropy_coeff: 0
+    fsdp_config:
+      model_dtype: bfloat16
+      param_offload: false
+      optimizer_offload: false
+
+  rollout:
+    log_prob_micro_batch_size_per_gpu: 4
+    tensor_model_parallel_size: 1
+    name: vllm
+    gpu_memory_utilization: 0.6
+    enable_chunked_prefill: false
+    enforce_eager: false
+    free_cache_engine: false
+    n: 5
+
+  ref:
+    log_prob_micro_batch_size_per_gpu: 4
+    fsdp_config:
+      param_offload: true
+
+trainer:
+  critic_warmup: 0
+  logger: console
+  project_name: 'verl_grpo_example_gsm'
+  experiment_name: 'qwen2_5'
+  n_gpus_per_node: 1
+  nnodes: 4
+  save_freq: 20
+  test_freq: 5
+  total_epochs: 15
