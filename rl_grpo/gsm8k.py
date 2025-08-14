@@ -582,8 +582,8 @@ def main():
     print("Setting up inference service...")
     inference_gpus = kt.Compute(
         gpus="1",
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.10-py3").run_bash(
-            "uv pip install --system --break-system-packages --no-build-isolation flash-attn==2.7.3 vllm==0.9.0 'transformers<4.54.0'"
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
+            "uv pip install --system --break-system-packages --no-deps -r kubetorch-examples/rl_grpo/requirements-inference.txt"
         ),
         shared_memory_limit="2Gi",
         launch_timeout=1200,
@@ -605,7 +605,7 @@ def main():
     print("Setting up training service...")
     train_gpus = kt.Compute(
         gpus=1,
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.10-py3").run_bash(
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
             "uv pip install --system --break-system-packages 'torch>=2.2.0' transformers datasets accelerate"
         ),
         launch_timeout=600,
