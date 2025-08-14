@@ -38,6 +38,7 @@
 from typing import Dict, List, Union
 
 import kubetorch as kt
+
 #
 # ### Create Vector Embedding Service
 # We construct a standard Embedder class, and use kubetorch decorators to convert it into a deployable kubetorch service.
@@ -66,15 +67,6 @@ class Embedder:
         if not isinstance(text, list):
             text = [text]
         return self.model.encode(text, **embed_kwargs).tolist()
-
-
-# ### Define the LLM (LLama) Service
-# We similarly define a `LlamaModel` class that uses kubetorch decorators to convert it into a deployable service.
-# The `LlamaModel` class is detailed in the [LLM Inference Example](https://www.run.house/examples/vllm-llama3-inference), so
-# here we simply reimport the `LlamaModel` class from that example. For more details on the `LlamaModel` implementation,
-# see that example.
-
-from vllm_inference.llama import LlamaModel
 
 
 # ### Deploy the Services with Kubetorch
@@ -118,6 +110,14 @@ from vllm_inference.llama import LlamaModel
 
 import uvicorn
 from fastapi import Body, FastAPI, HTTPException
+
+# ### Define the LLM (LLama) Service
+# We similarly define a `LlamaModel` class that uses kubetorch decorators to convert it into a deployable service.
+# The `LlamaModel` class is detailed in the [LLM Inference Example](https://www.run.house/examples/vllm-llama3-inference), so
+# here we simply reimport the `LlamaModel` class from that example. For more details on the `LlamaModel` implementation,
+# see that example.
+
+from vllm_inference.llama import LlamaModel
 
 app = FastAPI()
 
