@@ -3,14 +3,24 @@ algorithm:
   use_kl_in_reward: false
 
 data:
+<<<<<<< HEAD
   hf_data_name: DigitalLearningGmbH/MATH-lighteval
   train_files: /data/math/train.parquet
   val_files: /data/math/test.parquet
+=======
+  hf_data_name: openai/gsm8k
+  train_files: /data/gsm8k/train.parquet
+  val_files: /data/gsm8k/test.parquet
+>>>>>>> origin
   train_batch_size: 64
   max_prompt_length: 512
   max_response_length: 1024
   filter_overlong_prompts: true
   truncation: error
+<<<<<<< HEAD
+=======
+  image_key: images
+>>>>>>> origin
 
 actor_rollout_ref:
   model:
@@ -54,8 +64,13 @@ actor_rollout_ref:
 
 trainer:
   critic_warmup: 0
+<<<<<<< HEAD
   logger: [console, wandb]
   project_name: 'verl_grpo_example_math'
+=======
+  logger: console
+  project_name: 'verl_grpo_example_gsm'
+>>>>>>> origin
   experiment_name: 'qwen2_5'
   n_gpus_per_node: 1
   nnodes: 4
