@@ -13,12 +13,26 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 
 class vLLM:
     def __init__(self, model_id="Qwen/Qwen2.5-1.5B-Instruct"):
-        import os
-        import subprocess
-
         from vllm import LLM
 
         # Kill any existing vLLM process using GPU - we need this for redeployment
+        self.stop_existing_server()
+
+        print("Loading model in vLLM:", model_id)
+        self.model_id = model_id
+        self.model = LLM(
+            self.model_id,
+            dtype="bfloat16",
+            trust_remote_code=True,
+            max_model_len=2048,  # Reduces size of KV store
+            enforce_eager=True,  # Disable compilation to avoid hash issues with reloaded checkpoints
+        )
+
+    @staticmethod
+    def stop_existing_server():
+        import os
+        import subprocess
+
         try:
             result = subprocess.run(
                 ["nvidia-smi"], capture_output=True, text=True, check=True
@@ -34,16 +48,6 @@ class vLLM:
                         os.system(f"kill -9 {pid}")
         except:
             pass  # nvidia-smi not available or no GPU processes
-
-        print("Loading model in vLLM:", model_id)
-        self.model_id = model_id
-        self.model = LLM(
-            self.model_id,
-            dtype="bfloat16",
-            trust_remote_code=True,
-            max_model_len=2048,  # Reduces size of KV store
-            # enforce_eager=True,
-        )
 
     def generate(
         self,
@@ -66,6 +70,7 @@ class vLLM:
             max_tokens=max_tokens,
         )
 
+        print(f"Generating response with model_id: {self.model_id}")
         all_outputs = self.model.generate(queries, sampling_params)
         completions = [
             output.text for outputs in all_outputs for output in outputs.outputs
@@ -83,16 +88,17 @@ class MathAgent:
             "You are a helpful math assistant. "
             "Solve the following problem step by step. "
             "Show your work and reasoning. "
-            "End your response with '#### [Final Answer]' where [Final Answer] is just the numerical answer."
+            "End your response with '#### <answer>' where <answer> is just the numerical answer. "
+            "Do not include any units or the word answer in your response."
         )
 
-    def answer(self, questions: List[str], temperature=0.7, max_tokens=512):
+    def answer(self, questions: List[str], temperature=0.7, max_tokens=512, top_p=0.95):
         """Generate answers for a batch of questions."""
         prompts = [
             f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:" for q in questions
         ]
         completions, token_ids = self.inference_service.generate(
-            prompts, max_tokens=max_tokens, temperature=temperature, top_p=0.95
+            prompts, max_tokens=max_tokens, temperature=temperature, top_p=top_p
         )
         return completions, token_ids
 
@@ -395,16 +401,16 @@ class GRPOTrainer:
         if os.environ.get("RANK", None) != "0":
             return
 
-        self.latest_checkpoint = f"qwen-grpo-checkpoint-{self.steps}-steps"
-        Path(self.latest_checkpoint).mkdir(parents=True, exist_ok=True)
+        checkpoint_path = Path(f"qwen-grpo-checkpoint-{self.steps}-steps")
 
         # Get the underlying model (unwrap DDP if needed)
         model_to_save = (
             self.model.module if hasattr(self.model, "module") else self.model
         )
 
-        model_to_save.save_pretrained(self.latest_checkpoint)
-        self.tokenizer.save_pretrained(self.latest_checkpoint)
+        model_to_save.save_pretrained(checkpoint_path.resolve())
+        self.tokenizer.save_pretrained(checkpoint_path.resolve())
+        self.latest_checkpoint = str(checkpoint_path)
         print(f"Checkpoint saved at {self.latest_checkpoint}")
         return {"checkpoint_path": self.latest_checkpoint}
 
@@ -420,14 +426,14 @@ class GRPOTrainer:
         # We do this from the training service so we can sync the latest checkpoint into the inference service
         # image. We could also just save it to a shared storage location like blob storage and redeploy from within
         # the AsyncGRPOPipeline.
-        inference_service.compute.image.rsync(
-            source=self.latest_checkpoint, dest=self.latest_checkpoint
-        )
-        init_args = {
-            "model_id": self.latest_checkpoint.replace("/", "-"),
-        }
+        inference_service.compute.image.rsync(source=self.latest_checkpoint, dest="./")
 
+        print(
+            f"Redeploying inference service with checkpoint: {self.latest_checkpoint}"
+        )
+        init_args = {"model_id": self.latest_checkpoint}
         service = inference_service.to(inference_service.compute, init_args=init_args)
+        service.generate(["Test"], max_tokens=10)  # Warm up the service
         return service
 
 
@@ -436,14 +442,12 @@ class AsyncGRPOPipeline:
 
     def __init__(
         self,
-        inference_service,
         train_service,
         agent,
         batch_size=32,
         num_generations=4,  # Number of completions per prompt
         max_workers=1,
     ):  # Reduced to 1 to avoid vLLM concurrency issues
-        self.inference_service = inference_service
         self.train_service = train_service
         self.agent = agent
         self.batch_size = batch_size
@@ -466,7 +470,7 @@ class AsyncGRPOPipeline:
             expanded_answers.extend([a] * self.num_generations)
 
         # Generate completions using inference service
-        completions, token_ids = self.inference_service.generate(
+        completions, token_ids = self.agent.answer(
             expanded_prompts, max_tokens=512, temperature=0.7, top_p=0.95
         )
 
@@ -474,6 +478,15 @@ class AsyncGRPOPipeline:
         rewards = self.agent.calculate_rewards(
             expanded_prompts, completions, expanded_answers
         )
+
+        for prompt, completion, reward, answer in zip(
+            expanded_prompts, completions, rewards, expanded_answers
+        ):
+            print(f"********* Prompt ********* :\n{prompt}")
+            print(f"********* Completion ********* :\n{completion}")
+            print(f"********* Reward ********* : {reward}")
+            print(f"********* True Answer ********* : {answer}")
+            print("*******************************\n")
 
         return completions, token_ids, rewards
 
@@ -519,9 +532,8 @@ class AsyncGRPOPipeline:
                     completion_ids=token_ids,
                     rewards=rewards,
                     num_generations=self.num_generations,
-                )[
-                    0
-                ]  # Only need metrics from one worker
+                )[0]
+                # Only need metrics from one worker
 
                 total_loss += metrics["loss"]
                 total_reward += metrics["reward_mean"]
@@ -557,8 +569,8 @@ def main():
     from datasets import load_dataset
 
     # Configuration - Further reduced for memory
-    batch_size = 2  # Very small batch size
-    num_generations = 2  # Reduced generations
+    batch_size = 3  # Very small batch size
+    num_generations = 3  # Reduced generations
     num_epochs = 3
     batches_per_epoch = 3  # Fewer batches for testing
 
@@ -578,11 +590,15 @@ def main():
         secrets=["huggingface"],
     ).autoscale(initial_scale=1, min_scale=1, max_scale=5, concurrency=64)
 
+    # If the inference service is already deployed, we can reuse it as a starting point
+    # rather than starting from scratch. Switch get_if_exists to False to start fresh.
     inference_service = kt.cls(vLLM).to(inference_gpus, get_if_exists=True)
 
+    agent = MathAgent(inference_service=inference_service)
+
     # Test inference service
-    print("Testing inference service...")
-    test_response = inference_service.generate(["What is 2+2?"], max_tokens=50)
+    print("Testing math agent and inference service...")
+    test_response = agent.answer(["What is 2+2?"], max_tokens=50)
     print(f"Test response: {test_response[0]}")
 
     # Setup training service
@@ -599,9 +615,7 @@ def main():
     train_service = kt.cls(GRPOTrainer).to(train_gpus)
 
     # Create pipeline
-    agent = MathAgent()
     pipeline = AsyncGRPOPipeline(
-        inference_service=inference_service,
         train_service=train_service,
         agent=agent,
         batch_size=batch_size,
