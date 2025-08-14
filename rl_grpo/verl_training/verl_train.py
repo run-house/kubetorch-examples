@@ -1,3 +1,12 @@
+# # RL with VERL
+# In this example, we will show you how simple it is to launch an RL training with
+# VERL using Kubetorch and Ray.
+
+# There are two main components here:
+# * A run_grpo function which we will run on a Ray cluster that we bring up in `main()`
+# * The verl PPO trainer which we will call with our config as-is once all the data and model
+# have been downloaded.
+
 import kubetorch as kt
 import ray
 from download_data import download_data_math, download_model
@@ -7,10 +16,8 @@ from omegaconf import OmegaConf, open_dict
 from verl.trainer.main_ppo import run_ppo
 
 # This is the function we will run on remote compute to start the GRPO
-# training process. It will use the configuration dictionary passed to it, and
-# we show downloading the data before executing the training.
-# You likely want to write glue code before launching the verl
-# trainer instead of dispatching the trainer directly.
+# training process. It will use the configuration passed to it (merging with
+# the baseline verl config), and we show downloading the data before executing the training.
 def run_grpo(cfg):
     GlobalHydra.instance().clear()
     with initialize_config_module(
@@ -35,6 +42,9 @@ def run_grpo(cfg):
         run_ppo(cfg)
 
 
+# We define the main function that sets up the Kubetorch compute environment
+# and sends our run_grpo function to be executed on the remote compute which is a Ray
+# cluster with num nodes and gpus per node as per our config.
 def main(cfg):
     img = kt.Image(
         image_id="verlai/verl:base-verl0.5-cu126-cudnn9.8-torch2.7.0-fa2.7.4"
