@@ -1,10 +1,23 @@
+# # Demonstrating Fault Tolerance with Automatic Batch Size Finding
+#
+# ::youtube[Fault Tolerance]{url="https://www.youtube.com/watch?v=CH0mMcR5hZ8"}
+#
+# In this example, we demonstrate how to handle out-of-memory (OOM) errors during
+# distributed training by automatically adjusting the batch size.
+# But more generically, this shows how Kubetorch gives you powerful programmatic control
+# and fault tolerance over your training and other ML jobs. You can launch nodes conservatively,
+# catch OOMs, and then relaunch on larger compute (instead of always requesting maximum resources);
+# or you can automatically setup retries with different configs; or you can tolerate pre-emptions;
+# etc.
 import time
 
 import kubetorch as kt
 import torch
 from torch.nn.parallel import DistributedDataParallel as DDP
 
-
+# ## Dummy Training Function
+# This function simulates a distributed training job using PyTorch's DDP.
+# You can think of this as the training entrypoint to any training job you have today.
 def train(epochs, batch_size=32):
     torch.distributed.init_process_group(backend="nccl")
     try:
@@ -39,6 +52,12 @@ def train(epochs, batch_size=32):
     return loss.tolist(), rank
 
 
+# ## Catching an OOM and Continuing Training
+# In main, we launch a distributed training job on multiple nodes (1 GPU per node, but illustrates multi-node)
+# using PyTorch (which can be any training), running one epoch at a time with increasing batch sizes until it
+# finds an out-of-memory (OOM) error. Then, it just goes and restarts the training from the last successful batch size.
+# You now have powerful progrmmatic control over your program's behavior in the face of faults happening from within
+# the training, instead of the program failing completely.
 if __name__ == "__main__":
     gpus = kt.Compute(
         gpus=1,
