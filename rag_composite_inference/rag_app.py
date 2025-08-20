@@ -1,8 +1,10 @@
 # # RAG App with Vector Embedding and LLM Generation
 #
 # Retrieval augmented generation (RAG) combines custom traditional information retrieval with large language models
-# to enirch the response from the LLM. By embedding content from context-specific URLs into a vector database, the
-# system can intelligently answer questions with relevant, sourced information.
+# to enirch the response from the LLM. We can build such a composite inference app by using Kubetorch to deploy
+# independent vector embedder and LLM services, then launch a FastAPI app that calls these services to handle requests.
+#
+# ::youtube[RAG App with Vector Embedding and LLM Generation]{url="https://www.youtube.com/watch?v=sqNYnowFufY"}
 #
 # ## Overview
 # In this example, we build a FastAPI application that extracts content from public URLs, embeds the text into a vector
