@@ -48,7 +48,7 @@ def run_grpo(cfg):
 def main(cfg):
     img = kt.Image(
         image_id="verlai/verl:base-verl0.5-cu126-cudnn9.8-torch2.7.0-fa2.7.4"
-    ).pip_install(["datasets", "omegaconf", "verl", "vllm"])
+    ).pip_install(["datasets", "omegaconf", "verl", "vllm==0.10.0"])
 
     # Extract GPU config for kubetorch
     compute = kt.Compute(

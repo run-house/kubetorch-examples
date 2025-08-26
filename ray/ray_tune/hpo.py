@@ -18,6 +18,7 @@ def ray_tune_hpo(num_samples=4, max_concurrent_trials=2):
     """Ray Tune hyperparameter optimization function for testing."""
     # Initialize Ray (should connect to existing cluster)
     ray.init(address="auto")
+    print("hello")
 
     def train_function(config):
         """Training function for Ray Tune."""
@@ -57,7 +58,7 @@ def ray_tune_hpo(num_samples=4, max_concurrent_trials=2):
     }
 
 
-def fine_minimum():
+def find_minimum():
     ray_compute = kt.Compute(
         cpus="2", memory="3Gi", image=kt.Image(image_id="rayproject/ray")
     ).distribute("ray", workers=2)
@@ -70,6 +71,5 @@ def fine_minimum():
 
 
 if __name__ == "__main__":
-    # Uncomment to test the find_minmum service locally.
-    res = fine_minimum()
+    res = find_minimum()
     print(res)
