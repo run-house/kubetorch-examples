@@ -56,7 +56,7 @@ def train(epochs, batch_size=32):
 # In main, we launch a distributed training job on multiple nodes (1 GPU per node, but illustrates multi-node)
 # using PyTorch (which can be any training), running one epoch at a time with increasing batch sizes until it
 # finds an out-of-memory (OOM) error. Then, it just goes and restarts the training from the last successful batch size.
-# You now have powerful progrmmatic control over your program's behavior in the face of faults happening from within
+# You now have powerful programmatic control over your program's behavior in the face of faults happening from within
 # the training, instead of the program failing completely.
 if __name__ == "__main__":
     gpus = kt.Compute(
@@ -66,9 +66,8 @@ if __name__ == "__main__":
     ).distribute("pytorch", workers=4)
     train_ddp = kt.fn(train).to(gpus)
 
-    # Let's find an OOM
     batch_size = 2**12
-    while batch_size <= 2**20:
+    while batch_size <= 2**20: 
         try:
             print(f"Running with batch size {2*batch_size}")
             train_ddp(epochs=1, batch_size=2 * batch_size)
