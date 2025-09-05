@@ -7,7 +7,7 @@
 # But more generically, this shows how Kubetorch gives you powerful programmatic control
 # and fault tolerance over your training and other ML jobs. You can launch nodes conservatively,
 # catch OOMs, and then relaunch on larger compute (instead of always requesting maximum resources);
-# or you can automatically setup retries with different configs; or you can tolerate pre-emptions;
+# or you can automatically set up retries with different configs; or you can tolerate pre-emptions;
 # etc.
 import time
 
@@ -56,8 +56,9 @@ def train(epochs, batch_size=32):
 # In main, we launch a distributed training job on multiple nodes (1 GPU per node, but illustrates multi-node)
 # using PyTorch (which can be any training), running one epoch at a time with increasing batch sizes until it
 # finds an out-of-memory (OOM) error. Then, it just goes and restarts the training from the last successful batch size.
+# The compute pods, data, and model are all kept in place, even after CUDA OOM, so the restart to start real training is instant.
 # You now have powerful programmatic control over your program's behavior in the face of faults happening from within
-# the training, instead of the program failing completely.
+# the training, instead of the program failing.
 if __name__ == "__main__":
     gpus = kt.Compute(
         gpus=1,
