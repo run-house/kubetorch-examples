@@ -10,8 +10,6 @@ import time
 from pathlib import Path
 from typing import Dict
 
-# os.environ["KT_LOG_LEVEL"] = "DEBUG"
-
 # Configure NCCL to be more resilient to failures
 # os.environ["NCCL_TIMEOUT"] = "30"  # 30 second timeout for NCCL operations
 # os.environ["NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10"  # Heartbeat timeout
@@ -66,12 +64,17 @@ class BERTTrainer:
 
     def setup(self):
         """Initialize distributed training, model, and optimizer with restart recovery."""
-        if torch.distributed.is_initialized() and self.dataloader:
-            print("Process group already initialized, skipping setup.")
+        if torch.distributed.is_initialized() and self.dataloader is not None:
+            print("Setup already complete for this instance, skipping.")
             return
 
-        print("Connecting to process group...")
-        torch.distributed.init_process_group(backend="nccl")
+        if not torch.distributed.is_initialized():
+            print("Connecting to process group...")
+            torch.distributed.init_process_group(backend="nccl")
+        else:
+            print(
+                "Process group already initialized, completing setup for this instance."
+            )
 
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
@@ -156,22 +159,24 @@ class BERTTrainer:
             print(f"Rank {self.rank}: No local checkpoint found")
             self.epoch = 0
 
-        # Sync epoch info and find which rank has the max epoch
+        # Get max epoch across all ranks
         epoch_tensor = torch.tensor([self.epoch], dtype=torch.long, device=self.device)
-        rank_tensor = torch.tensor(
-            [self.rank if has_checkpoint else -1], dtype=torch.long, device=self.device
-        )
-
-        # Get max epoch and the rank that has it
         torch.distributed.all_reduce(epoch_tensor, op=torch.distributed.ReduceOp.MAX)
-        torch.distributed.all_reduce(rank_tensor, op=torch.distributed.ReduceOp.MAX)
-
         max_epoch = epoch_tensor[0].item()
-        source_rank = rank_tensor[0].item() if rank_tensor[0].item() >= 0 else 0
+
+        # Find a rank that has the max epoch (use min rank for determinism and to only select one)
+        has_max_epoch = torch.tensor(
+            [self.rank if self.epoch == max_epoch else self.world_size],
+            dtype=torch.long,
+            device=self.device,
+        )
+        torch.distributed.all_reduce(has_max_epoch, op=torch.distributed.ReduceOp.MIN)
+        source_rank = has_max_epoch[0].item()
 
         self.epoch = max_epoch
 
         # All ranks participate in weight sync (both sender and receivers)
+        # Don't sync if all ranks have epoch 0, i.e. no checkpoint found on any rank
         if self.epoch > 0:
             if self.rank == source_rank:
                 print(
@@ -245,71 +250,55 @@ class BERTTrainer:
         """
         Main training loop with checkpoint saving for preemption recovery.
         """
-        avg_epoch_loss = 0
-        try:
-            self.setup()
+        self.setup()
 
-            for epoch in range(self.epoch, self.epoch + epochs):
-                print(f"Training epoch {epoch}")
-                self.model.train()
-                epoch_loss = 0
-                num_batches = 0
+        for epoch in range(self.epoch, self.epoch + epochs):
+            print(f"Training epoch {epoch}")
+            self.model.train()
+            epoch_loss = 0
+            num_batches = 0
 
-                # Set epoch for distributed sampler
-                self.dataloader.sampler.set_epoch(epoch)
+            # Set epoch for distributed sampler
+            self.dataloader.sampler.set_epoch(epoch)
 
-                for batch_idx, batch in enumerate(self.dataloader):
-                    start_time = time.time()
-                    # Move to device
-                    input_ids = batch["input_ids"].to(self.device)
-                    attention_mask = batch["attention_mask"].to(self.device)
-                    labels = batch["label"].to(self.device)
+            for batch_idx, batch in enumerate(self.dataloader):
+                start_time = time.time()
+                # Move to device
+                input_ids = batch["input_ids"].to(self.device)
+                attention_mask = batch["attention_mask"].to(self.device)
+                labels = batch["label"].to(self.device)
 
-                    # Forward pass
-                    outputs = self.model(
-                        input_ids=input_ids, attention_mask=attention_mask
+                # Forward pass
+                outputs = self.model(input_ids=input_ids, attention_mask=attention_mask)
+                loss = F.cross_entropy(outputs.logits, labels)
+
+                # Backward pass (this is where DDP hangs if a rank is dead)
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
+
+                epoch_loss += loss.item()
+                num_batches += 1
+
+                end_time = time.time()
+                if batch_idx % 5 == 0:
+                    print(
+                        f"Rank {self.rank}, Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}, Time/Batch: {end_time - start_time:.2f}s"
                     )
-                    loss = F.cross_entropy(outputs.logits, labels)
+                self.latest_loss = loss.item()  # Update latest loss for checkpointing
 
-                    # Backward pass (this is where DDP hangs if a rank is dead)
-                    self.optimizer.zero_grad()
-                    loss.backward()
-                    self.optimizer.step()
+            self.epoch += 1  # Update last completed epoch
+            avg_epoch_loss = epoch_loss / max(num_batches, 1)
+            self.latest_loss = avg_epoch_loss
+            print(
+                f"Rank {self.rank}: Epoch {epoch} complete, Avg Loss: {avg_epoch_loss:.4f}"
+            )
 
-                    epoch_loss += loss.item()
-                    num_batches += 1
-
-                    end_time = time.time()
-                    if batch_idx % 5 == 0:
-                        print(
-                            f"Rank {self.rank}, Epoch {epoch}, Batch {batch_idx}, Loss: {loss.item():.4f}, Time/Batch: {end_time - start_time:.2f}s"
-                        )
-                    self.latest_loss = (
-                        loss.item()
-                    )  # Update latest loss for checkpointing
-
-                self.epoch += 1  # Update last completed epoch
-                avg_epoch_loss = epoch_loss / max(num_batches, 1)
-                self.latest_loss = avg_epoch_loss
-                print(
-                    f"Rank {self.rank}: Epoch {epoch} complete, Avg Loss: {avg_epoch_loss:.4f}"
-                )
-
-                # Save checkpoint after each epoch (for preemption recovery)
-                # self.save_checkpoint()
-
-            return {
-                "rank": self.rank,
-                "loss": self.latest_loss,
-                "epochs_completed": self.epoch,
-            }
-        except Exception as e:
-            print(f"Rank {self.rank}: Training failed with exception: {e}")
-            # try:
-            #     torch.distributed.destroy_process_group()
-            # except:
-            #     pass  # Process group might already be corrupted
-            raise e
+        return {
+            "rank": self.rank,
+            "loss": self.latest_loss,
+            "epochs_completed": self.epoch,
+        }
 
 
 def main():

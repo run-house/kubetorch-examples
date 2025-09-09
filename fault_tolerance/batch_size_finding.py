@@ -68,7 +68,7 @@ if __name__ == "__main__":
     train_ddp = kt.fn(train).to(gpus)
 
     batch_size = 2**12
-    while batch_size <= 2**20: 
+    while batch_size <= 2**20:
         try:
             print(f"Running with batch size {2*batch_size}")
             train_ddp(epochs=1, batch_size=2 * batch_size)
