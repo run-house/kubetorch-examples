@@ -150,33 +150,6 @@ class MathAgent:
         return rewards
 
 
-def pad_right(tensors: List[torch.Tensor], padding_value: int = 0) -> torch.Tensor:
-    """Pad a list of tensors to the same shape on the right."""
-    if not tensors:
-        return torch.tensor([])
-
-    # Find max shape
-    max_shape = [
-        max(t.shape[i] if i < len(t.shape) else 0 for t in tensors)
-        for i in range(max(len(t.shape) for t in tensors))
-    ]
-
-    # Create output tensor
-    output = torch.full(
-        (len(tensors), *max_shape),
-        padding_value,
-        dtype=tensors[0].dtype,
-        device=tensors[0].device,
-    )
-
-    # Fill with actual values
-    for i, t in enumerate(tensors):
-        slices = tuple(slice(0, s) for s in t.shape)
-        output[i][slices] = t
-
-    return output
-
-
 class GRPOTrainer:
     def __init__(
         self,
@@ -427,8 +400,7 @@ class GRPOTrainer:
             return
 
         # We do this from the training service so we can sync the latest checkpoint into the inference service
-        # image. We could also just save it to a shared storage location like blob storage and redeploy from within
-        # the AsyncGRPOPipeline.
+        # image. We could also just save it to a shared storage location like blob storage.
         inference_service.compute.image.rsync(source=self.latest_checkpoint, dest="./")
 
         print(
@@ -466,7 +438,7 @@ class SyncGRPOPipeline:
         total_reward = 0
         num_batches_processed = 0
 
-        # Process batches sequentially for true on-policy training
+        # Process batches sequentially
         for i in range(0, len(indices), self.batch_size):
             batch_indices = indices[i : i + self.batch_size]
             batch_prompts = [dataset[int(idx)]["question"] for idx in batch_indices]
@@ -493,9 +465,9 @@ class SyncGRPOPipeline:
                     expanded_prompts, completions, expanded_answers
                 )
 
-                # Log first batch examples
-                if num_batches_processed == 0:
-                    for j in range(min(2, len(completions))):
+                # Log some examples
+                if num_batches_processed == 0:  # First batch
+                    for j in range(min(2, len(completions))):  # Show first 2 examples
                         print(f"\n--- Example {j+1} ---")
                         print(f"Question: {expanded_prompts[j]}")
                         print(f"Completion: {completions[j]}")
@@ -614,7 +586,7 @@ async def main():
             dataset, num_batches=batches_per_epoch
         )
 
-        # Save and redeploy checkpoint after each epoch for on-policy training
+        # Save and redeploy checkpoint after each epoch
         if epoch_metrics["num_batches"] > 0:
             print(f"Epoch {epoch + 1} complete. Saving checkpoint...")
             await train_service.save_checkpoint()
