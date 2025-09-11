@@ -104,7 +104,7 @@ class SimpleTrainer:
     def predict(self, data):
         self.model.eval()
         with torch.no_grad():
-            output = self.model(x.to(self.device))
+            output = self.model(data.to(self.device))
 
         return output.argmax(1).item()
 

@@ -1,10 +1,10 @@
 import asyncio
 import os
 import re
+import time
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
-from dataclasses import dataclass
-import time
 
 import kubetorch as kt
 import numpy as np
@@ -16,6 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 @dataclass
 class Trajectory:
     """Container for a single trajectory/rollout."""
+
     prompt: str
     completion: str
     token_ids: List[int]
@@ -26,21 +27,23 @@ class Trajectory:
 
 class TrajectoryBuffer:
     """Simple async buffer for storing trajectories."""
-    
+
     def __init__(self, max_size: int = 10000):
         self.queue = asyncio.Queue(maxsize=max_size)
         self.buffer = []  # For accumulating batch
-        
+
     async def add(self, trajectories: List[Trajectory]):
         """Add trajectories to the buffer."""
         for traj in trajectories:
             await self.queue.put(traj)
-    
-    async def sample(self, batch_size: int, timeout: float = 30.0) -> Optional[List[Trajectory]]:
+
+    async def sample(
+        self, batch_size: int, timeout: float = 30.0
+    ) -> Optional[List[Trajectory]]:
         """Get a batch from the buffer."""
         batch = []
         deadline = time.time() + timeout
-        
+
         # Try to get batch_size items
         for i in range(batch_size):
             try:
@@ -51,13 +54,13 @@ class TrajectoryBuffer:
                 batch.append(item)
             except asyncio.TimeoutError:
                 break
-        
+
         # Return what we got (could be partial batch or empty)
         if batch:
             print(f"Sampled batch of {len(batch)} trajectories")
             return batch
         return None
-    
+
     def size(self) -> int:
         """Get current buffer size."""
         return self.queue.qsize()
@@ -249,25 +252,32 @@ class GRPOTrainer:
         )
 
         if self.use_lora:
-            from peft import LoraConfig, get_peft_model, TaskType
-            
+            from peft import get_peft_model, LoraConfig, TaskType
+
             print(f"Setting up LoRA with r={self.lora_r}, alpha={self.lora_alpha}")
-            
+
             # Configure LoRA
             lora_config = LoraConfig(
                 task_type=TaskType.CAUSAL_LM,
                 r=self.lora_r,
                 lora_alpha=self.lora_alpha,
                 lora_dropout=self.lora_dropout,
-                target_modules=["q_proj", "v_proj", "k_proj", "o_proj", 
-                               "gate_proj", "up_proj", "down_proj"],  # Qwen2.5 modules
+                target_modules=[
+                    "q_proj",
+                    "v_proj",
+                    "k_proj",
+                    "o_proj",
+                    "gate_proj",
+                    "up_proj",
+                    "down_proj",
+                ],  # Qwen2.5 modules
                 bias="none",
             )
-            
+
             # Apply LoRA
             self.model = get_peft_model(self.model, lora_config)
             self.model.print_trainable_parameters()
-            
+
             # Enable gradient checkpointing with LoRA
             self.model.enable_input_require_grads()
             self.model.gradient_checkpointing_enable()
@@ -310,7 +320,9 @@ class GRPOTrainer:
             weight_decay=0.01,  # Add weight decay for regularization
         )
 
-        print(f"Model setup complete on {self.device} with {'LoRA' if self.use_lora else 'full model'} training")
+        print(
+            f"Model setup complete on {self.device} with {'LoRA' if self.use_lora else 'full model'} training"
+        )
 
     def compute_token_level_loss(
         self,
@@ -470,12 +482,16 @@ class GRPOTrainer:
     def save_checkpoint(self):
         """Save the current model checkpoint with versioning."""
         self.checkpoint_version += 1
-        
+
         if self.use_lora:
             # Save LoRA adapters only (much smaller and faster)
-            checkpoint_path = Path(f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps")
+            checkpoint_path = Path(
+                f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
+            )
         else:
-            checkpoint_path = Path(f"qwen-grpo-checkpoint-v{self.checkpoint_version}-{self.steps}-steps")
+            checkpoint_path = Path(
+                f"qwen-grpo-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
+            )
 
         # Get the underlying model (unwrap DDP if needed)
         model_to_save = (
@@ -487,12 +503,13 @@ class GRPOTrainer:
             model_to_save.save_pretrained(checkpoint_path.resolve())
             # Also save a config file indicating the base model
             import json
+
             config = {
                 "base_model": self.model_id,
                 "use_lora": True,
                 "lora_r": self.lora_r,
                 "lora_alpha": self.lora_alpha,
-                "checkpoint_version": self.checkpoint_version
+                "checkpoint_version": self.checkpoint_version,
             }
             with open(checkpoint_path / "adapter_config.json", "w") as f:
                 json.dump(config, f, indent=2)
@@ -500,13 +517,15 @@ class GRPOTrainer:
             # Save full model
             model_to_save.save_pretrained(checkpoint_path.resolve())
             self.tokenizer.save_pretrained(checkpoint_path.resolve())
-        
+
         self.latest_checkpoint = str(checkpoint_path)
-        print(f"{'LoRA' if self.use_lora else 'Full'} checkpoint v{self.checkpoint_version} saved at {self.latest_checkpoint}")
+        print(
+            f"{'LoRA' if self.use_lora else 'Full'} checkpoint v{self.checkpoint_version} saved at {self.latest_checkpoint}"
+        )
         return {
             "checkpoint_path": self.latest_checkpoint,
             "version": self.checkpoint_version,
-            "use_lora": self.use_lora
+            "use_lora": self.use_lora,
         }
 
     def deploy_inference_service(self, inference_service):
@@ -531,7 +550,7 @@ class GRPOTrainer:
 
 class AsyncOffPolicyGRPO:
     """Async off-policy GRPO with parallel inference and training."""
-    
+
     def __init__(
         self,
         train_service,
@@ -552,37 +571,37 @@ class AsyncOffPolicyGRPO:
         self.current_checkpoint_version = 0
         self.training_steps = 0
         self.should_stop = False
-    
+
     async def inference_loop(self, dataset, num_batches=None):
         """Continuously generate trajectories using the current checkpoint."""
         print("Starting inference loop...")
         indices = np.random.permutation(len(dataset))
         if num_batches:
             indices = indices[: num_batches * self.batch_size]
-        
+
         batch_idx = 0
         while not self.should_stop:
             # Get batch of data
             start_idx = (batch_idx * self.batch_size) % len(indices)
             end_idx = min(start_idx + self.batch_size, len(indices))
             batch_indices = indices[start_idx:end_idx]
-            
+
             # If we've wrapped around, reshuffle
             if end_idx >= len(indices):
                 indices = np.random.permutation(len(dataset))
                 if num_batches:
                     indices = indices[: num_batches * self.batch_size]
-            
+
             batch_prompts = [dataset[int(idx)]["question"] for idx in batch_indices]
             batch_answers = [dataset[int(idx)]["answer"] for idx in batch_indices]
-            
+
             # Expand for multiple generations
             expanded_prompts = []
             expanded_answers = []
             for p, a in zip(batch_prompts, batch_answers):
                 expanded_prompts.extend([p] * self.num_generations)
                 expanded_answers.extend([a] * self.num_generations)
-            
+
             try:
                 # Generate completions
                 completions, token_ids = await self.agent.answer(
@@ -591,12 +610,12 @@ class AsyncOffPolicyGRPO:
                     temperature=0.7,
                     top_p=0.95,
                 )
-                
+
                 # Calculate rewards
                 rewards = self.agent.calculate_rewards(
                     expanded_prompts, completions, expanded_answers
                 )
-                
+
                 # Create trajectory objects
                 trajectories = []
                 for prompt, completion, ids, reward in zip(
@@ -608,49 +627,51 @@ class AsyncOffPolicyGRPO:
                         token_ids=ids,
                         reward=reward,
                         checkpoint_version=self.current_checkpoint_version,
-                        timestamp=time.time()
+                        timestamp=time.time(),
                     )
                     trajectories.append(traj)
-                
+
                 # Add to buffer
                 await self.buffer.add(trajectories)
-                
+
                 buffer_size = self.buffer.size()
-                print(f"Inference: Generated {len(trajectories)} trajectories "
-                      f"(checkpoint v{self.current_checkpoint_version}). "
-                      f"Buffer size: {buffer_size}")
-                
+                print(
+                    f"Inference: Generated {len(trajectories)} trajectories "
+                    f"(checkpoint v{self.current_checkpoint_version}). "
+                    f"Buffer size: {buffer_size}"
+                )
+
             except Exception as e:
                 print(f"Error in inference loop: {e}")
                 await asyncio.sleep(1)  # Brief pause before retrying
-            
+
             batch_idx += 1
-            
+
             # Small delay to prevent overwhelming the system
             await asyncio.sleep(0.1)
-    
+
     async def training_loop(self):
         """Continuously train on trajectories from the buffer."""
         print("Starting training loop...")
-        
+
         while not self.should_stop:
             # Sample batch from buffer
             trajectories = await self.buffer.sample(
                 self.batch_size * self.num_generations,
                 timeout=30.0,
             )
-            
+
             if trajectories is None:
                 print("Training: Timeout waiting for trajectories")
                 continue
-            
+
             try:
                 # Unpack trajectories into the format expected by train_batch
                 prompts = [t.prompt for t in trajectories]
                 completions = [t.completion for t in trajectories]
                 completion_ids = [t.token_ids for t in trajectories]
                 rewards = [t.reward for t in trajectories]
-                
+
                 # Train on batch
                 metrics_list = await self.train_service.train_batch(
                     prompts=prompts,
@@ -659,44 +680,52 @@ class AsyncOffPolicyGRPO:
                     rewards=rewards,
                     num_generations=self.num_generations,
                 )
-                metrics = metrics_list[0] if metrics_list else {}  # Only need metrics from one worker
-                
+                metrics = (
+                    metrics_list[0] if metrics_list else {}
+                )  # Only need metrics from one worker
+
                 self.training_steps += 1
-                
+
                 # Log metrics
                 checkpoint_versions = set(t.checkpoint_version for t in trajectories)
-                if 'loss' in metrics:
-                    print(f"Training step {self.training_steps}: "
-                          f"Loss={metrics['loss']:.4f}, "
-                          f"Reward={metrics.get('reward_mean', 0):.4f}, "
-                          f"Checkpoint versions in batch: {checkpoint_versions}")
+                if "loss" in metrics:
+                    print(
+                        f"Training step {self.training_steps}: "
+                        f"Loss={metrics['loss']:.4f}, "
+                        f"Reward={metrics.get('reward_mean', 0):.4f}, "
+                        f"Checkpoint versions in batch: {checkpoint_versions}"
+                    )
                 else:
-                    print(f"Training step {self.training_steps}: "
-                          f"Metrics: {metrics}, "
-                          f"Checkpoint versions in batch: {checkpoint_versions}")
-                
+                    print(
+                        f"Training step {self.training_steps}: "
+                        f"Metrics: {metrics}, "
+                        f"Checkpoint versions in batch: {checkpoint_versions}"
+                    )
+
                 # Periodically save and update inference checkpoint
                 if self.training_steps % self.checkpoint_update_interval == 0:
                     print(f"Saving checkpoint after {self.training_steps} steps...")
-                    checkpoint_info_list = await self.train_service.save_checkpoint(workers=[0])
+                    checkpoint_info_list = await self.train_service.save_checkpoint(
+                        workers=[0]
+                    )
                     checkpoint_info = checkpoint_info_list[0]
-                    
+
                     # We only want the first value back
                     if checkpoint_info:
                         # Update the inference service with new checkpoint
                         await self.update_inference_checkpoint(checkpoint_info)
-                
+
             except Exception as e:
                 raise e
                 # print(f"Error in training loop: {e}")
                 # await asyncio.sleep(1)
-    
+
     async def update_inference_checkpoint(self, checkpoint_info):
         """Update the inference service with a new checkpoint."""
         new_version = checkpoint_info["version"]
-        
+
         print(f"Updating inference service to checkpoint v{new_version}...")
-        
+
         try:
             # Call the training service's deploy method (which runs on the training node and can rsync)
             new_service = await self.train_service.deploy_inference_service(
@@ -704,40 +733,40 @@ class AsyncOffPolicyGRPO:
                 serialization="pickle",
                 workers=[0],
             )[0]
-            
+
             if new_service:
                 # Update our reference to the new service
                 self.inference_service = new_service
                 self.inference_service.async_ = True
-                
+
                 # Update version tracker
                 self.current_checkpoint_version = new_version
-                
+
                 # Reassign to agent
                 self.agent.inference_service = self.inference_service
-                
+
                 print(f"Inference service updated to checkpoint v{new_version}")
-            
+
         except Exception as e:
             print(f"Error updating inference checkpoint: {e}")
-    
+
     async def run(self, dataset, num_epochs=3, batches_per_epoch=10):
         """Run the async off-policy training pipeline."""
         print("Starting async off-policy GRPO training...")
-        
+
         # Start both loops concurrently
         inference_task = asyncio.create_task(
             self.inference_loop(dataset, num_batches=batches_per_epoch)
         )
         training_task = asyncio.create_task(self.training_loop())
-        
+
         # Run for specified duration
         target_steps = num_epochs * batches_per_epoch
-        
+
         try:
             while self.training_steps < target_steps:
                 await asyncio.sleep(5)  # Check progress every 5 seconds
-                
+
                 # Check if tasks have failed
                 if inference_task.done():
                     # This will raise the exception if the task failed
@@ -745,20 +774,22 @@ class AsyncOffPolicyGRPO:
                 if training_task.done():
                     # This will raise the exception if the task failed
                     training_task.result()
-                
+
                 buffer_size = self.buffer.size()
-                print(f"Progress: {self.training_steps}/{target_steps} steps, "
-                      f"Buffer size: {buffer_size}")
-            
+                print(
+                    f"Progress: {self.training_steps}/{target_steps} steps, "
+                    f"Buffer size: {buffer_size}"
+                )
+
             # Final checkpoint
             await self.train_service.save_checkpoint()
             print("Training complete!")
-            
+
         finally:
             # Stop loops
             print("Stopping training...")
             self.should_stop = True
-            
+
             # Wait for tasks to complete (don't suppress exceptions)
             await asyncio.gather(inference_task, training_task)
 
@@ -787,7 +818,7 @@ async def main():
         shared_memory_limit="2Gi",
         launch_timeout=1200,
         secrets=["huggingface"],
-    ) #.autoscale(initial_scale=1, min_scale=1, max_scale=5, concurrency=64)
+    )  # .autoscale(initial_scale=1, min_scale=1, max_scale=5, concurrency=64)
 
     # Setup training service compute
     print("Setting up training service compute...")
@@ -833,9 +864,7 @@ async def main():
     )
 
     await pipeline.run(
-        dataset,
-        num_epochs=num_epochs,
-        batches_per_epoch=batches_per_epoch
+        dataset, num_epochs=num_epochs, batches_per_epoch=batches_per_epoch
     )
 
 

@@ -3,6 +3,8 @@
 # while dispatching execution to a code sandbox (running on separate compute)
 # from within the trainer program.
 #
+# ::youtube[TRL]{url="https://www.youtube.com/watch?v=yB29sojkAiU"}
+#
 # There are three main components here:
 # * A code agent class, which will run code and return stdout/err + success/fail
 # * A training encapsulation class that launches the code agent on 0.5 CPUs on separate
