@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-# We define a model class. We define a very basic feedforward neural network with three fully connected layers.
+# We define a model class: a very basic feedforward neural network with three fully connected layers.
 class SimpleNN(nn.Module):
     def __init__(self):
         super(SimpleNN, self).__init__()

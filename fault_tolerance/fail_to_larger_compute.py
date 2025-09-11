@@ -1,5 +1,8 @@
 # # Demonstrating Fault Tolerance with Automatic Try-Catch
-# 1. A function to process file that fails randomly 20% of the time and throws a fake OOM
+# Kubetorch gives you powerful programmatic fault tolerance over your code, and in this example, we
+# show the common case where you might hit OOMs on your remote processes and it takes a human to
+# manually restart (or you overprovision every job to avoid the errors).
+# 1. A function to process a file that fails randomly 20% of the time and throws a fake OOM
 # 2. Hard coded example of instance specs that are used by `launch_service` to launch our function onto compute
 # 3. Iterating through the instance config sizes and calling the remote processing (running on larger and larger compute)
 # in a loop over any files that failed the previous size.

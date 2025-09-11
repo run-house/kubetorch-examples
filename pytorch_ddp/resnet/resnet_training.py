@@ -1,6 +1,8 @@
-# ## ResNet-152 Training with PyTorch Distributed
-# This script demonstrates how to set up a distributed training pipeline using PyTorch, ResNet-152, and AWS S3.
-# The training pipeline involves initializing a distributed model, loading data from S3, and saving model checkpoints back to S3.
+# # ResNet-152 Training with PyTorch Distributed
+# This code demonstrates how to set up a distributed training pipeline using PyTorch, ResNet-152, and AWS S3.
+# The training pipeline involves initializing a distributed model, loading data from S3,
+# and saving model checkpoints back to S3.
+#
 # Key components include:
 # - A custom ResNet-152 model class with optional pretrained weights from S3.
 # - A trainer class for managing the training loop, data loading, and distributed communication.
@@ -21,7 +23,7 @@ from torch.utils.data.distributed import DistributedSampler
 
 from torchvision import models
 
-# ### ResNet152 Model Class
+# ## ResNet152 Model Class
 # Define the ResNet-152 model class, with support for loading pretrained weights from S3.
 # This is used by the trainer class to initialize the model.
 class ResNet152Model(nn.Module):
@@ -51,7 +53,7 @@ class ResNet152Model(nn.Module):
         return self.model(x)
 
 
-# ### Trainer Class
+# ## Trainer Class
 # The Trainer class orchestrates the distributed training process, including:
 # * Initializing the distributed communication backend
 # * Setting up the model, data loaders, and optimizer
@@ -243,7 +245,7 @@ class ResNet152Trainer:
             return predicted.item()
 
 
-# ### Run distributed training
+# ## Run distributed training
 # The following code snippet demonstrates how to launch compute and run the distributed training pipeline on the remote compute.
 # - We define a 3 node compute with GPUs where we will do the training, and call .distribute('pytorch') to properly setup the distributed training
 # - Then we dispatch the trainer class to the remote compute

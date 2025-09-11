@@ -1,11 +1,12 @@
+# # Preprocessing data for DLRM
+# The following function until line 35 is regular, undecorated Python that uses Ray Data for processing.
+# It is sent to the remote compute for execution.
 import kubetorch as kt
 import ray
 import ray.data
 from ray.data.preprocessors import StandardScaler
 
-# ## Preprocessing data for DLRM
-# The following function until line 35 is regular, undecorated Python that uses Ray Data for processing.
-# It is sent to the remote compute for execution.
+
 def preprocess_data(s3_read_path, s3_write_path, filename):
     # Load datasets using Ray Data
     ratings = ray.data.read_csv(f"{s3_read_path}/{filename}")
@@ -37,8 +38,8 @@ def preprocess_data(s3_read_path, s3_write_path, filename):
 
 # ## Launch compute and execute
 # Here, we launch compute, dispatch the preprocessing function to the compute, and call that function.
-# Whether launching elastic compute or from Kubernetes, Runhouse wires up the Ray cluster for you and downs the cluster when complete.
-# Runhouse syncs the code the code across and makes it a callable "service" on the remote.
+# Whether launching elastic compute or from Kubernetes, Kubetorch wires up the Ray cluster for you and downs the cluster when complete.
+# Kubetorch syncs the code across and makes it a callable "service" on the remote.
 # This code can be identically placed within an orchestrator (e.g. my_pipeline.yaml) and identical execution will occur.
 if __name__ == "__main__":
 

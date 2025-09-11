@@ -13,7 +13,7 @@ from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
 # ## First we encapsulate XGB training in a class
-# We will send this training class to a remote instance with a GPU with Runhouse
+# We will send this training class to a remote instance with a GPU with Kubetorch
 class Trainer:
     def __init__(self):
         self.model = None
