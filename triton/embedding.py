@@ -1,44 +1,22 @@
-# # High-Performance Online Embedding Inference with Triton Server
+# # Online Embedding Inference with Triton Server
 
-# This example demonstrates how to deploy a high-performance embedding service using NVIDIA Triton Inference Server
-# with Kubetorch. Triton provides optimized inference serving with features like dynamic batching, model versioning,
-# and multi-framework support.
-#
-# ## Example Overview
-# Deploy an embedding model (BGE-Large-EN-v1.5) using Triton Inference Server for high-throughput inference.
-# The service automatically downloads a pre-built ONNX model, configures Triton server, and provides a simple
+# This example demonstrates how to deploy a high-performance embedding service using NVIDIA's Triton.
+# Specifically, we deploy an embedding model (BGE-Large-EN-v1.5) by downloading
+# a pre-built ONNX model, configuring Triton server, and exposing a simple
 # API for text embedding generation.
 #
-# #### Key Features:
-# - **Just-in-time model loading**: Uses a publicly available ONNX checkpoint for BGE-Large-EN-v1.5, but loads it live
-#   at start time, avoiding building it into a new dedicated Docker image.
-# - **gRPC communication**: Uses gRPC for efficient client-server communication
-# - **Automatic server management**: Handles Triton server startup, health checks, and model loading
-# - **Normalization support**: Optional L2 normalization for cosine similarity calculations
-#
-# #### Performance Benefits:
-# - **Dynamic batching**: Triton can batch multiple requests for higher throughput
-# - **GPU optimization**: Leverages TensorRT and other NVIDIA optimizations
-# - **Concurrent processing**: Supports high concurrency with autoscaling
-#
-# ### What does Kubetorch enable?
-# Kubetorch allows you to deploy Triton Inference Server as a managed service with automatic scaling,
-# health monitoring, and seamless integration with your existing workflows. The server lifecycle
-# is managed automatically, and you can focus on your inference logic rather than infrastructure.
-#
-# ## Triton Model Configuration
-# First, we define the Triton model configuration that specifies how the ONNX model should be served.
-# This includes input/output specifications, GPU instance groups, and optimization settings.
-
+# Kubetorch allows you to use Python to deploy Triton Inference Server as an
+# autoscaling managed service simply by calling `kt deploy embedding.py`.
+# Then, we can call against that inference service directly in code as we demonstrate in
+# `main` with 30 threads in a pool, and those calls propagate to my service. You can call
+# this service from anywhere, either using Kubetorch as a client library (simply import the decorated
+# class), or by regular HTTP posts from within your VPC.
 import os
 import shlex
 import subprocess
 import time
 
 import kubetorch as kt
-
-# URL for the pre-built ONNX model (BGE-Large-EN-v1.5 converted to ONNX format)
-MODEL_URL = "https://huggingface.co/BAAI/bge-large-en-v1.5/resolve/main/onnx/model.onnx"
 
 # Triton model configuration for serving the ONNX model
 TRITON_MODEL_CONFIG = """
@@ -79,18 +57,19 @@ instance_group [
   }
 ]
 """
+MODEL_URL = "https://huggingface.co/BAAI/bge-large-en-v1.5/resolve/main/onnx/model.onnx"
 
 # ## Image and Compute Setup
-# We use the official NVIDIA Triton Server image and install the necessary Python dependencies
-# for the embedding service. The image includes CUDA support and Triton server binaries.
+# We use the official NVIDIA Triton image (including CUDA) and install the necessary Python dependencies
+# for the embedding service. Then, we define the required compute, which simply requesting 1 GPU
+# per replica, while the `autoscale` API allows us to define the min (scale to zero) and max (5 replicas)
+# copies of our service. Finally the Class we define is helpful, because it enables you to implement rich
+# lazy loading logic or input pre-processing, as we lightly do here.
 triton_img = kt.Image(image_id="nvcr.io/nvidia/tritonserver:25.06-py3").run_bash(
     "uv pip install --system --break-system-packages transformers==4.53.1 torch==2.7.1 tritonclient[grpc]==2.59.0"
 )
 
-# ## Embedding Service Class
-# The `Embedder` class encapsulates the Triton server lifecycle and provides a simple API
-# for text embedding generation. It handles model downloading, server startup, health checks,
-# and inference requests.
+
 @kt.compute(gpus="1", image=triton_img)
 @kt.autoscale(initial_replicas=1, min_replicas=0, max_replicas=4, concurrency=1000)
 class Embedder:
@@ -219,7 +198,7 @@ class Embedder:
         return embeddings[0].tolist() if isinstance(text, str) else embeddings.tolist()
 
 
-# ## Testing and Performance Benchmarking
+# ## Testing and Benchmarking
 # The following code demonstrates how to test the embedding service and measure its performance
 # under concurrent load. This is useful for understanding the throughput capabilities of your
 # Triton-based embedding service.
@@ -248,8 +227,7 @@ Triton server is ready!
 TEST_TEXT_LINES = [SAMPLE_TEXT.split("\n")] * 40
 
 if __name__ == "__main__":
-    # ## Deploy and Test the Embedding Service
-    # Uncomment the following line to deploy the Embedder service to remote compute
+    # You can call `kt deploy embedding.py` or uncomment the below
     # Embedder.deploy()
 
     # Test single embedding generation

@@ -7,6 +7,8 @@
 # * The verl PPO trainer which we will call with our config as-is once all the data and model
 # have been downloaded.
 
+import os
+
 import kubetorch as kt
 import ray
 from download_data import download_data_math, download_model
@@ -46,16 +48,19 @@ def run_grpo(cfg):
 # and sends our run_grpo function to be executed on the remote compute which is a Ray
 # cluster with num nodes and gpus per node as per our config.
 def main(cfg):
-    img = kt.Image(
-        image_id="verlai/verl:base-verl0.5-cu126-cudnn9.8-torch2.7.0-fa2.7.4"
-    ).pip_install(["datasets", "omegaconf", "verl", "vllm==0.10.0"])
+    img = (
+        kt.Image(
+            image_id="verlai/verl:app-verl0.5-transformers4.55.4-vllm0.10.0-mcore0.13.0-te2.2"
+        )
+        .pip_install(["datasets", "omegaconf", "verl"])
+        .set_env_vars({"WANDB_API_KEY": os.environ["WANDB_API_KEY"]})
+    )
 
-    # Extract GPU config for kubetorch
     compute = kt.Compute(
-        gpus=cfg.trainer.get("n_gpus_per_node", 1),
+        gpus=cfg.trainer.get("n_gpus_per_node", 1),  # Extract GPU config for kubetorch
+        memory="100Gi",
         image=img,
         allowed_serialization=["pickle", "json"],  # Config serialized with pickle
-        secrets=["wandb"],
     ).distribute("ray", workers=cfg.trainer.get("nnodes", 2))
 
     trainer = kt.fn(run_grpo).to(compute)

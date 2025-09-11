@@ -1,3 +1,8 @@
+# # Ray Hyperparameter Tuning
+# In this example, we show you how to start a basic hyperparameter tuning using Ray Tune on remote compute.
+# You simply need to write your Ray Tune program as you would normally, and then send it to the remote cluster.
+# Kubetorch handles all the complexities of launching and setting up the remote Ray cluster for you.
+
 import time
 
 import kubetorch as kt
@@ -6,6 +11,10 @@ import ray
 from ray import tune
 
 
+# ## Define a Ray Tune program
+# You should simply think of this as "any regular Ray Tune program" that you would write entirely agnostic of Kubetorch.
+# * A dummy objective function that is used by the train_function() to score the hyperparameters.
+# * A Ray Tune Tuner that runs the train_function() over a search space of hyperparameters.
 def dummy_objective_function(width, height, step):
     """Dummy objective function for hyperparameter optimization."""
     # Simulate some computation time
@@ -58,6 +67,11 @@ def ray_tune_hpo(num_samples=4, max_concurrent_trials=2):
     }
 
 
+# ## Define Compute and Execution
+# In code, we will define the compute our Ray Tune program will run on, dispatch our function to
+# the compute and execute it normally, as if it were local, propagating the values we want
+# to the remote function call. You must have Kuberay installed on your cluster, the installation
+# instructions with Kubetorch [are here](https://www.run.house/kubetorch/installation#ray-support-optional).
 def find_minimum():
     ray_compute = kt.Compute(
         cpus="2", memory="3Gi", image=kt.Image(image_id="rayproject/ray")

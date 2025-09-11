@@ -14,8 +14,8 @@ data:
 
 actor_rollout_ref:
   model:
-    hf_model_name: Qwen/Qwen2.5-0.5B-Instruct
-    path: Qwen/Qwen2.5-0.5B-Instruct
+    hf_model_name: Qwen/Qwen2.5-1.5B-Instruct
+    path: Qwen/Qwen2.5-1.5B-Instruct
     use_remove_padding: true
     lora_rank: 64
     lora_alpha: 32

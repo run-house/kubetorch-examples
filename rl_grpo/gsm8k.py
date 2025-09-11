@@ -1,3 +1,18 @@
+# # Illustrative RL Training with Kubetorch
+# In this example, we do the simplest possible demonstration of Kubetorch's ability
+# to do reinforcement learning by defining 3 classes: a `vLLM` class for inference, a
+# `MathAgent` class for calculating rewards, and a `GRPOTrainer` class to do PyTorch
+# DDP training. Each of these components are vanilla and called in a loop in sequence
+# by `SyncGRPOPipeline`.
+#
+# Finally, in `main`, we launch each of the services. Inference and training launch very
+# differently: while training is launched with PyTorch distribution wired up (and any calls made
+# to the launched service is vectorized over it's replicas), inference is launched as a autoscaling
+# service with different underlying image.
+#
+# Disclaimer: this is not an optimized RL training example, which takes place in other examples.
+# Instead, this is simplified, synchronous loops to show how Kubetorch
+# lets you define resources and services in code, launch them, and call into each.
 import asyncio
 import os
 import re
@@ -10,12 +25,14 @@ import torch
 import torch.nn.functional as F
 from transformers import AutoModelForCausalLM, AutoTokenizer
 
-
+# ## vLLM Inference Class
+# A regular inference class with method `generate()` used for inference, with
+# an added method to kill any existing / previous vLLM deployments as a convenience.
 class vLLM:
     def __init__(self, model_id="Qwen/Qwen2.5-1.5B-Instruct"):
         from vllm import LLM
 
-        # Kill any existing vLLM process using GPU - we need this for redeployment
+        # Kill any existing vLLM process using GPU
         self.stop_existing_server()
 
         print("Loading model in vLLM:", model_id)
@@ -38,11 +55,9 @@ class vLLM:
                 ["nvidia-smi"], capture_output=True, text=True, check=True
             )
             for line in result.stdout.split("\n"):
-                if (
-                    "python" in line.lower() and "C" in line
-                ):  # C indicates compute process
+                if "python" in line.lower() and "C" in line:
                     elems = line.split()
-                    pid = elems[elems.index("C") - 1]  # Pick the element before "C"
+                    pid = elems[elems.index("C") - 1]
                     if pid.isdigit():
                         print(f"Killing existing vLLM process: {pid}")
                         os.system(f"kill -9 {pid}")
@@ -81,6 +96,9 @@ class vLLM:
         return completions, token_ids
 
 
+# ## MathAgent Evaluation Class
+# A basic evaluation for GSM8K that calls into the inference service and contains
+# the method to assign a custom reward to the returned answer.
 class MathAgent:
     def __init__(self, inference_service: vLLM = None):
         self.inference_service = inference_service
@@ -150,33 +168,9 @@ class MathAgent:
         return rewards
 
 
-def pad_right(tensors: List[torch.Tensor], padding_value: int = 0) -> torch.Tensor:
-    """Pad a list of tensors to the same shape on the right."""
-    if not tensors:
-        return torch.tensor([])
-
-    # Find max shape
-    max_shape = [
-        max(t.shape[i] if i < len(t.shape) else 0 for t in tensors)
-        for i in range(max(len(t.shape) for t in tensors))
-    ]
-
-    # Create output tensor
-    output = torch.full(
-        (len(tensors), *max_shape),
-        padding_value,
-        dtype=tensors[0].dtype,
-        device=tensors[0].device,
-    )
-
-    # Fill with actual values
-    for i, t in enumerate(tensors):
-        slices = tuple(slice(0, s) for s in t.shape)
-        output[i][slices] = t
-
-    return output
-
-
+# ## Trainer Class
+# Encapsulating DDP-based training of a base model, including calculation of
+# loss and checkpointing.
 class GRPOTrainer:
     def __init__(
         self,
@@ -440,9 +434,10 @@ class GRPOTrainer:
         return service
 
 
+# ## Simple synchronous on-policy GRPO training pipeline
+# Both the inference and the training services are happening on Kubernetes, "remote" to
+# this pipeline, but being called into by this pipeline regularly.
 class SyncGRPOPipeline:
-    """Simple synchronous on-policy GRPO training pipeline."""
-
     def __init__(
         self,
         train_service,
@@ -541,6 +536,13 @@ class SyncGRPOPipeline:
         }
 
 
+# ## Setup and Deploy with Kubetorch
+# Here is where we use Kubetorch to take our classes from above and launch
+# them on Kubernets. Training is launched with PyTorch Distributed setup, and any calls
+# to the service will hit every replica ("multi-controller"); inference is launched with
+# autoscaling, as we set the number of replicas as high as 5 with concurrency of 64 per
+# replica. Calls to the vLLM remote service/class will route between all the replicas
+# without the user needing to be aware of that routing.
 async def main():
     from datasets import load_dataset
 
