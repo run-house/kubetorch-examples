@@ -5,7 +5,7 @@
 # ::youtube[verl]{url="https://youtu.be/-oz49qt_uSM"}
 #
 # There are two main components here:
-# * A `run_grpo`` function which we will run on a Ray cluster that we bring up in `main()`
+# * A `run_grpo` function which we will run on a Ray cluster that we bring up in `main()`
 # * The `verl` PPO trainer which we will call with our config as-is once all the data and model
 # have been downloaded.
 

@@ -2,7 +2,7 @@
 # In this example, we define a simple `Trainer` class that encapsulates XGBoost training, with
 # basic data loading, preprocessing, and training methods that you can easily imagine as your own.
 # Then, in `main`, we define compute and layer on some pip installs while requesting a GPU.
-# We dispatch this `Trainer`` class to that remote compute and then call against it as if the remote
+# We dispatch this `Trainer` class to that remote compute and then call against it as if the remote
 # class was local; the remote class holds state and can be used to test the model immediately after
 # training as well.
 
