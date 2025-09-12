@@ -1,4 +1,5 @@
 import asyncio
+import json
 import os
 import re
 import time
@@ -38,7 +39,7 @@ class TrajectoryBuffer:
             await self.queue.put(traj)
 
     async def sample(
-        self, batch_size: int, timeout: float = 30.0
+        self, batch_size: int, timeout: float = 120.0
     ) -> Optional[List[Trajectory]]:
         """Get a batch from the buffer."""
         batch = []
@@ -67,42 +68,93 @@ class TrajectoryBuffer:
 
 
 class vLLM:
-    def __init__(self, model_id="Qwen/Qwen2.5-1.5B-Instruct"):
+    def __init__(
+        self,
+        model_id="Qwen/Qwen2.5-1.5B-Instruct",
+        lora_checkpoint=None,
+        kt_cached_state=None,
+    ):
+        """Initialize vLLM with optional cached state from Kubetorch.
+
+        Args:
+            model_id: The base model ID to use
+            lora_checkpoint: Path to LoRA checkpoint to load
+            kt_cached_state: Cached state from previous instance (provided by Kubetorch upon redeploy)
+        """
+        import os
+
         from vllm import LLM
 
-        # Kill any existing vLLM process using GPU - we need this for redeployment
-        self.stop_existing_server()
-
-        print("Loading model in vLLM:", model_id)
+        print(
+            f"Initializing vLLM with model_id={model_id}, lora_checkpoint={lora_checkpoint}"
+        )
         self.model_id = model_id
+        self.base_model_id = model_id  # Keep track of base model
+        self.current_lora_request = None
+
+        # Check if we have cached state from Kubetorch
+        if kt_cached_state and "model" in kt_cached_state:
+            print("Reusing existing vLLM engine from Kubetorch cached state")
+            self.model = kt_cached_state["model"]
+
+            # If a new LoRA checkpoint is provided, hot-swap it
+            if lora_checkpoint and os.path.exists(lora_checkpoint):
+                print(f"Hot-swapping LoRA adapter to: {lora_checkpoint}")
+                self.load_lora_adapter(lora_checkpoint)
+            return
+
+        # First time initialization - create the vLLM engine
+        print("Creating new vLLM engine with LoRA support")
         self.model = LLM(
-            self.model_id,
+            self.model_id,  # Always use base model for LoRA
             dtype="bfloat16",
             trust_remote_code=True,
-            max_model_len=2048,  # Reduces size of KV store
-            enforce_eager=True,  # Disable compilation to avoid hash issues with reloaded checkpoints
+            max_model_len=2048,
+            enforce_eager=True,
+            enable_lora=True,  # Always enable LoRA support
+            max_lora_rank=32,  # Maximum LoRA rank
+            max_loras=4,  # Can load multiple LoRA adapters
         )
 
-    @staticmethod
-    def stop_existing_server():
-        import os
-        import subprocess
+        # If a LoRA checkpoint was provided and exists, load it
+        if lora_checkpoint and os.path.exists(lora_checkpoint):
+            print(f"Loading LoRA checkpoint: {lora_checkpoint}")
+            self.load_lora_adapter(lora_checkpoint)
 
-        try:
-            result = subprocess.run(
-                ["nvidia-smi"], capture_output=True, text=True, check=True
-            )
-            for line in result.stdout.split("\n"):
-                if (
-                    "python" in line.lower() and "C" in line
-                ):  # C indicates compute process
-                    elems = line.split()
-                    pid = elems[elems.index("C") - 1]  # Pick the element before "C"
-                    if pid.isdigit():
-                        print(f"Killing existing vLLM process: {pid}")
-                        os.system(f"kill -9 {pid}")
-        except:
-            pass  # nvidia-smi not available or no GPU processes
+    def __kt_cached_state__(self):
+        """Return state to be cached by Kubetorch across reloads.
+
+        This method is called by Kubetorch before reloading the class.
+        The returned dictionary will be passed to the new instance's __init__
+        via the kt_cached_state parameter.
+        """
+        # Preserve the vLLM engine
+        return {"model": self.model}
+
+    def load_lora_adapter(self, lora_path, lora_id=None):
+        """Load a LoRA adapter without restarting the server - fast hot-swap."""
+        if lora_id is None:
+            # Use checkpoint version from path if available
+            import re
+
+            version_match = re.search(r"v(\d+)", lora_path)
+            if version_match:
+                lora_id = f"adapter_v{version_match.group(1)}"
+            else:
+                lora_id = f"adapter_{hash(lora_path)}"
+
+        print(f"Hot-swapping LoRA adapter from {lora_path} with ID {lora_id}")
+
+        # For newer vLLM versions (>0.4.0)
+        from vllm.lora.request import LoRARequest
+
+        self.current_lora_request = LoRARequest(
+            lora_name=lora_id,
+            lora_int_id=hash(lora_id) % 100000,  # Unique int ID
+            lora_local_path=lora_path,
+        )
+        self.model_id = lora_path  # Update model_id to track current adapter
+        print(f"LoRA adapter hot-swapped with ID {lora_id}")
 
     def generate(
         self,
@@ -126,7 +178,15 @@ class vLLM:
         )
 
         print(f"Generating response with model_id: {self.model_id}")
-        all_outputs = self.model.generate(queries, sampling_params)
+
+        # If we have a LoRA adapter loaded, use it
+        if self.current_lora_request:
+            all_outputs = self.model.generate(
+                queries, sampling_params, lora_request=self.current_lora_request
+            )
+        else:
+            all_outputs = self.model.generate(queries, sampling_params)
+
         completions = [
             output.text for outputs in all_outputs for output in outputs.outputs
         ]
@@ -156,7 +216,11 @@ class MathAgent:
         ]
         # Since inference_service.async_ is True, generate returns a coroutine
         completions, token_ids = await self.inference_service.generate(
-            prompts, max_tokens=max_tokens, temperature=temperature, top_p=top_p
+            prompts,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            top_p=top_p,
+            stream_logs=False,
         )
         return completions, token_ids
 
@@ -211,7 +275,6 @@ class GRPOTrainer:
         model_id="Qwen/Qwen2.5-1.5B-Instruct",
         learning_rate=1e-5,
         steps_per_epoch=10,
-        use_lora=True,
         lora_r=16,
         lora_alpha=32,
         lora_dropout=0.1,
@@ -227,13 +290,12 @@ class GRPOTrainer:
         self.checkpoint_version = 0
         self.device = None
         self.pad_token_id = None
-        self.use_lora = use_lora
         self.lora_r = lora_r
         self.lora_alpha = lora_alpha
         self.lora_dropout = lora_dropout
         # Set microbatch size for gradient accumulation
         # With LoRA we can process larger batches
-        self.microbatch_size = 4 if use_lora else 1
+        self.microbatch_size = 4
 
     def setup(self):
         """Initialize model, tokenizer, and optimizer with memory optimizations."""
@@ -251,39 +313,36 @@ class GRPOTrainer:
             low_cpu_mem_usage=True,  # Reduce CPU memory during loading
         )
 
-        if self.use_lora:
-            from peft import get_peft_model, LoraConfig, TaskType
+        # Always use LoRA in async version
+        from peft import get_peft_model, LoraConfig, TaskType
 
-            print(f"Setting up LoRA with r={self.lora_r}, alpha={self.lora_alpha}")
+        print(f"Setting up LoRA with r={self.lora_r}, alpha={self.lora_alpha}")
 
-            # Configure LoRA
-            lora_config = LoraConfig(
-                task_type=TaskType.CAUSAL_LM,
-                r=self.lora_r,
-                lora_alpha=self.lora_alpha,
-                lora_dropout=self.lora_dropout,
-                target_modules=[
-                    "q_proj",
-                    "v_proj",
-                    "k_proj",
-                    "o_proj",
-                    "gate_proj",
-                    "up_proj",
-                    "down_proj",
-                ],  # Qwen2.5 modules
-                bias="none",
-            )
+        # Configure LoRA
+        lora_config = LoraConfig(
+            task_type=TaskType.CAUSAL_LM,
+            r=self.lora_r,
+            lora_alpha=self.lora_alpha,
+            lora_dropout=self.lora_dropout,
+            target_modules=[
+                "q_proj",
+                "v_proj",
+                "k_proj",
+                "o_proj",
+                "gate_proj",
+                "up_proj",
+                "down_proj",
+            ],  # Qwen2.5 modules
+            bias="none",
+        )
 
-            # Apply LoRA
-            self.model = get_peft_model(self.model, lora_config)
-            self.model.print_trainable_parameters()
+        # Apply LoRA
+        self.model = get_peft_model(self.model, lora_config)
+        self.model.print_trainable_parameters()
 
-            # Enable gradient checkpointing with LoRA
-            self.model.enable_input_require_grads()
-            self.model.gradient_checkpointing_enable()
-        else:
-            # Enable gradient checkpointing to save memory
-            self.model.gradient_checkpointing_enable()
+        # Enable gradient checkpointing with LoRA
+        self.model.enable_input_require_grads()
+        self.model.gradient_checkpointing_enable()
 
         self.tokenizer = AutoTokenizer.from_pretrained(
             self.model_id, trust_remote_code=True
@@ -301,15 +360,10 @@ class GRPOTrainer:
         # Wrap model with DDP
         from torch.nn.parallel import DistributedDataParallel as DDP
 
-        if self.use_lora:
-            # For LoRA, only wrap with DDP without find_unused_parameters
-            self.model = DDP(
-                self.model, device_ids=[self.device], find_unused_parameters=False
-            )
-        else:
-            self.model = DDP(
-                self.model, device_ids=[self.device], find_unused_parameters=False
-            )
+        # For LoRA, wrap with DDP without find_unused_parameters
+        self.model = DDP(
+            self.model, device_ids=[self.device], find_unused_parameters=False
+        )
         print(f"Distributed training initialized on {self.device}")
 
         # Only optimize trainable parameters (much faster with LoRA)
@@ -320,9 +374,7 @@ class GRPOTrainer:
             weight_decay=0.01,  # Add weight decay for regularization
         )
 
-        print(
-            f"Model setup complete on {self.device} with {'LoRA' if self.use_lora else 'full model'} training"
-        )
+        print(f"Model setup complete on {self.device} with LoRA training")
 
     def compute_token_level_loss(
         self,
@@ -483,49 +535,36 @@ class GRPOTrainer:
         """Save the current model checkpoint with versioning."""
         self.checkpoint_version += 1
 
-        if self.use_lora:
-            # Save LoRA adapters only (much smaller and faster)
-            checkpoint_path = Path(
-                f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
-            )
-        else:
-            checkpoint_path = Path(
-                f"qwen-grpo-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
-            )
+        # Save LoRA adapters only (much smaller and faster)
+        checkpoint_path = Path(
+            f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
+        )
 
         # Get the underlying model (unwrap DDP if needed)
         model_to_save = (
             self.model.module if hasattr(self.model, "module") else self.model
         )
 
-        if self.use_lora:
-            # Save only the LoRA adapters
-            model_to_save.save_pretrained(checkpoint_path.resolve())
-            # Also save a config file indicating the base model
-            import json
+        # Save only the LoRA adapters - this will create the proper adapter_config.json
+        model_to_save.save_pretrained(checkpoint_path.resolve())
 
-            config = {
-                "base_model": self.model_id,
-                "use_lora": True,
-                "lora_r": self.lora_r,
-                "lora_alpha": self.lora_alpha,
-                "checkpoint_version": self.checkpoint_version,
-            }
-            with open(checkpoint_path / "adapter_config.json", "w") as f:
-                json.dump(config, f, indent=2)
-        else:
-            # Save full model
-            model_to_save.save_pretrained(checkpoint_path.resolve())
-            self.tokenizer.save_pretrained(checkpoint_path.resolve())
+        # The save_pretrained method above already creates a proper adapter_config.json
+        # with all required fields (r, target_modules, etc.) from the PEFT model.
+        # We can add our custom metadata to a separate file if needed.
+        metadata = {
+            "checkpoint_version": self.checkpoint_version,
+            "base_model": self.model_id,
+        }
+        with open(checkpoint_path / "training_metadata.json", "w") as f:
+            json.dump(metadata, f, indent=2)
 
         self.latest_checkpoint = str(checkpoint_path)
         print(
-            f"{'LoRA' if self.use_lora else 'Full'} checkpoint v{self.checkpoint_version} saved at {self.latest_checkpoint}"
+            f"LoRA checkpoint v{self.checkpoint_version} saved at {self.latest_checkpoint}"
         )
         return {
             "checkpoint_path": self.latest_checkpoint,
             "version": self.checkpoint_version,
-            "use_lora": self.use_lora,
         }
 
     def deploy_inference_service(self, inference_service):
@@ -542,9 +581,14 @@ class GRPOTrainer:
         print(
             f"Redeploying inference service with checkpoint: {self.latest_checkpoint}"
         )
-        init_args = {"model_id": self.latest_checkpoint}
+
+        # For LoRA, pass the adapter path for hot-swapping
+        init_args = {
+            "model_id": self.model_id,  # Keep base model
+            "lora_checkpoint": self.latest_checkpoint,  # Pass LoRA checkpoint for hot-swap
+        }
+
         service = inference_service.to(inference_service.compute, init_args=init_args)
-        service.generate(["Test"], max_tokens=10)  # Warm up the service
         return service
 
 
@@ -554,15 +598,15 @@ class AsyncOffPolicyGRPO:
     def __init__(
         self,
         train_service,
-        inference_service,
         agent,
         buffer: TrajectoryBuffer,
         batch_size=32,
         num_generations=4,
         checkpoint_update_interval=100,  # Update inference checkpoint every N training steps
+        min_buffer_size=100,  # Try to maintain at least this many trajectories in buffer
+        max_concurrent_batches=4,  # Maximum number of concurrent inference batches
     ):
         self.train_service = train_service
-        self.inference_service = inference_service
         self.agent = agent
         self.buffer = buffer
         self.batch_size = batch_size
@@ -571,84 +615,127 @@ class AsyncOffPolicyGRPO:
         self.current_checkpoint_version = 0
         self.training_steps = 0
         self.should_stop = False
+        self.min_buffer_size = min_buffer_size
+        self.max_concurrent_batches = max_concurrent_batches
+
+    async def process_batch(self, dataset, indices, start_idx, end_idx):
+        """Process a single batch of inference."""
+        batch_indices = indices[start_idx:end_idx]
+        batch_prompts = [dataset[int(idx)]["question"] for idx in batch_indices]
+        batch_answers = [dataset[int(idx)]["answer"] for idx in batch_indices]
+
+        # Expand for multiple generations
+        expanded_prompts = []
+        expanded_answers = []
+        for p, a in zip(batch_prompts, batch_answers):
+            expanded_prompts.extend([p] * self.num_generations)
+            expanded_answers.extend([a] * self.num_generations)
+
+        # Generate completions
+        completions, token_ids = await self.agent.answer(
+            expanded_prompts,
+            max_tokens=512,
+            temperature=0.7,
+            top_p=0.95,
+        )
+
+        # Calculate rewards
+        rewards = self.agent.calculate_rewards(
+            expanded_prompts, completions, expanded_answers
+        )
+
+        # Create trajectory objects
+        trajectories = []
+        for prompt, completion, ids, reward in zip(
+            expanded_prompts, completions, token_ids, rewards
+        ):
+            traj = Trajectory(
+                prompt=prompt,
+                completion=completion,
+                token_ids=ids,
+                reward=reward,
+                checkpoint_version=self.current_checkpoint_version,
+                timestamp=time.time(),
+            )
+            trajectories.append(traj)
+
+        return trajectories
 
     async def inference_loop(self, dataset, num_batches=None):
-        """Continuously generate trajectories using the current checkpoint."""
-        print("Starting inference loop...")
+        """Continuously generate trajectories with adaptive request rate."""
+        print("Starting adaptive inference loop...")
         indices = np.random.permutation(len(dataset))
         if num_batches:
             indices = indices[: num_batches * self.batch_size]
 
         batch_idx = 0
+        pending_tasks = set()
+
         while not self.should_stop:
-            # Get batch of data
-            start_idx = (batch_idx * self.batch_size) % len(indices)
-            end_idx = min(start_idx + self.batch_size, len(indices))
-            batch_indices = indices[start_idx:end_idx]
+            buffer_size = self.buffer.size()
 
-            # If we've wrapped around, reshuffle
-            if end_idx >= len(indices):
-                indices = np.random.permutation(len(dataset))
-                if num_batches:
-                    indices = indices[: num_batches * self.batch_size]
-
-            batch_prompts = [dataset[int(idx)]["question"] for idx in batch_indices]
-            batch_answers = [dataset[int(idx)]["answer"] for idx in batch_indices]
-
-            # Expand for multiple generations
-            expanded_prompts = []
-            expanded_answers = []
-            for p, a in zip(batch_prompts, batch_answers):
-                expanded_prompts.extend([p] * self.num_generations)
-                expanded_answers.extend([a] * self.num_generations)
-
-            try:
-                # Generate completions
-                completions, token_ids = await self.agent.answer(
-                    expanded_prompts,
-                    max_tokens=512,
-                    temperature=0.7,
-                    top_p=0.95,
+            # Adaptively decide how many concurrent batches to run
+            # If buffer is low, increase concurrent requests to trigger autoscaling
+            if buffer_size < self.min_buffer_size:
+                # Buffer is low - ramp up inference
+                target_concurrent = min(
+                    self.max_concurrent_batches,
+                    max(
+                        2,
+                        self.min_buffer_size
+                        // (self.batch_size * self.num_generations),
+                    ),
                 )
+            else:
+                # Buffer is healthy - maintain steady pace
+                target_concurrent = 1
 
-                # Calculate rewards
-                rewards = self.agent.calculate_rewards(
-                    expanded_prompts, completions, expanded_answers
+            # Launch new batches if needed
+            while len(pending_tasks) < target_concurrent and not self.should_stop:
+                start_idx = (batch_idx * self.batch_size) % len(indices)
+                end_idx = min(start_idx + self.batch_size, len(indices))
+
+                # If we've wrapped around, reshuffle
+                if end_idx >= len(indices):
+                    indices = np.random.permutation(len(dataset))
+                    if num_batches:
+                        indices = indices[: num_batches * self.batch_size]
+                    start_idx = 0
+                    end_idx = min(self.batch_size, len(indices))
+
+                # Create task for this batch
+                task = asyncio.create_task(
+                    self.process_batch(dataset, indices, start_idx, end_idx)
                 )
+                pending_tasks.add(task)
+                batch_idx += 1
 
-                # Create trajectory objects
-                trajectories = []
-                for prompt, completion, ids, reward in zip(
-                    expanded_prompts, completions, token_ids, rewards
-                ):
-                    traj = Trajectory(
-                        prompt=prompt,
-                        completion=completion,
-                        token_ids=ids,
-                        reward=reward,
-                        checkpoint_version=self.current_checkpoint_version,
-                        timestamp=time.time(),
-                    )
-                    trajectories.append(traj)
-
-                # Add to buffer
-                await self.buffer.add(trajectories)
-
-                buffer_size = self.buffer.size()
                 print(
-                    f"Inference: Generated {len(trajectories)} trajectories "
-                    f"(checkpoint v{self.current_checkpoint_version}). "
-                    f"Buffer size: {buffer_size}"
+                    f"Launched inference batch {batch_idx} "
+                    f"(concurrent: {len(pending_tasks)}/{target_concurrent}, buffer: {buffer_size})"
                 )
 
-            except Exception as e:
-                print(f"Error in inference loop: {e}")
-                await asyncio.sleep(1)  # Brief pause before retrying
+            # Wait for at least one task to complete
+            if pending_tasks:
+                done, pending_tasks = await asyncio.wait(
+                    pending_tasks, return_when=asyncio.FIRST_COMPLETED
+                )
 
-            batch_idx += 1
+                # Process completed tasks
+                for task in done:
+                    try:
+                        trajectories = await task
+                        await self.buffer.add(trajectories)
 
-            # Small delay to prevent overwhelming the system
-            await asyncio.sleep(0.1)
+                        buffer_size = self.buffer.size()
+                        print(
+                            f"Added {len(trajectories)} trajectories. Buffer size: {buffer_size}"
+                        )
+                    except Exception as e:
+                        print(f"Error processing batch: {e}")
+            else:
+                # No tasks running, brief pause
+                await asyncio.sleep(0.1)
 
     async def training_loop(self):
         """Continuously train on trajectories from the buffer."""
@@ -658,67 +745,77 @@ class AsyncOffPolicyGRPO:
             # Sample batch from buffer
             trajectories = await self.buffer.sample(
                 self.batch_size * self.num_generations,
-                timeout=30.0,
             )
 
             if trajectories is None:
                 print("Training: Timeout waiting for trajectories")
                 continue
 
-            try:
-                # Unpack trajectories into the format expected by train_batch
-                prompts = [t.prompt for t in trajectories]
-                completions = [t.completion for t in trajectories]
-                completion_ids = [t.token_ids for t in trajectories]
-                rewards = [t.reward for t in trajectories]
-
-                # Train on batch
-                metrics_list = await self.train_service.train_batch(
-                    prompts=prompts,
-                    completions=completions,
-                    completion_ids=completion_ids,
-                    rewards=rewards,
-                    num_generations=self.num_generations,
+            # If an incomplete batch came back, make sure they're the right shape that
+            # the trainer can still use them (and drop any stragglers)
+            if len(trajectories) % self.num_generations != 0:
+                # Trim to the largest multiple of num_generations
+                aligned_size = (
+                    len(trajectories) // self.num_generations
+                ) * self.num_generations
+                if aligned_size == 0:
+                    print(
+                        f"Training: Batch too small ({len(trajectories)} < {self.num_generations}), skipping"
+                    )
+                    continue
+                print(
+                    f"Training: Trimming incomplete batch from {len(trajectories)} to {aligned_size} trajectories"
                 )
-                metrics = (
-                    metrics_list[0] if metrics_list else {}
-                )  # Only need metrics from one worker
+                trajectories = trajectories[:aligned_size]
 
-                self.training_steps += 1
+            # Unpack trajectories into the format expected by train_batch
+            prompts = [t.prompt for t in trajectories]
+            completions = [t.completion for t in trajectories]
+            completion_ids = [t.token_ids for t in trajectories]
+            rewards = [t.reward for t in trajectories]
 
-                # Log metrics
-                checkpoint_versions = set(t.checkpoint_version for t in trajectories)
-                if "loss" in metrics:
-                    print(
-                        f"Training step {self.training_steps}: "
-                        f"Loss={metrics['loss']:.4f}, "
-                        f"Reward={metrics.get('reward_mean', 0):.4f}, "
-                        f"Checkpoint versions in batch: {checkpoint_versions}"
-                    )
-                else:
-                    print(
-                        f"Training step {self.training_steps}: "
-                        f"Metrics: {metrics}, "
-                        f"Checkpoint versions in batch: {checkpoint_versions}"
-                    )
+            # Train on batch
+            metrics_list = await self.train_service.train_batch(
+                prompts=prompts,
+                completions=completions,
+                completion_ids=completion_ids,
+                rewards=rewards,
+                num_generations=self.num_generations,
+            )
+            metrics = (
+                metrics_list[0] if metrics_list else {}
+            )  # Only need metrics from one worker
 
-                # Periodically save and update inference checkpoint
-                if self.training_steps % self.checkpoint_update_interval == 0:
-                    print(f"Saving checkpoint after {self.training_steps} steps...")
-                    checkpoint_info_list = await self.train_service.save_checkpoint(
-                        workers=[0]
-                    )
-                    checkpoint_info = checkpoint_info_list[0]
+            self.training_steps += 1
 
-                    # We only want the first value back
-                    if checkpoint_info:
-                        # Update the inference service with new checkpoint
-                        await self.update_inference_checkpoint(checkpoint_info)
+            # Log metrics
+            checkpoint_versions = set(t.checkpoint_version for t in trajectories)
+            if "loss" in metrics:
+                print(
+                    f"Training step {self.training_steps}: "
+                    f"Loss={metrics['loss']:.4f}, "
+                    f"Reward={metrics.get('reward_mean', 0):.4f}, "
+                    f"Checkpoint versions in batch: {checkpoint_versions}"
+                )
+            else:
+                print(
+                    f"Training step {self.training_steps}: "
+                    f"Metrics: {metrics}, "
+                    f"Checkpoint versions in batch: {checkpoint_versions}"
+                )
 
-            except Exception as e:
-                raise e
-                # print(f"Error in training loop: {e}")
-                # await asyncio.sleep(1)
+            # Periodically save and update inference checkpoint
+            if self.training_steps % self.checkpoint_update_interval == 0:
+                print(f"Saving checkpoint after {self.training_steps} steps...")
+                checkpoint_info_list = await self.train_service.save_checkpoint(
+                    workers=[0]
+                )
+                checkpoint_info = checkpoint_info_list[0]
+
+                # We only want the first value back
+                if checkpoint_info:
+                    # Update the inference service with new checkpoint
+                    await self.update_inference_checkpoint(checkpoint_info)
 
     async def update_inference_checkpoint(self, checkpoint_info):
         """Update the inference service with a new checkpoint."""
@@ -726,29 +823,27 @@ class AsyncOffPolicyGRPO:
 
         print(f"Updating inference service to checkpoint v{new_version}...")
 
-        try:
-            # Call the training service's deploy method (which runs on the training node and can rsync)
-            new_service = await self.train_service.deploy_inference_service(
-                self.inference_service,
+        # Call the training service's deploy method (which runs on the training node and can rsync)
+        new_service = (
+            await self.train_service.deploy_inference_service(
+                self.agent.inference_service,
                 serialization="pickle",
                 workers=[0],
-            )[0]
+            )
+        )[
+            0
+        ]  # spmd calls always return lists, so grab the first element for rank 0's response
 
-            if new_service:
-                # Update our reference to the new service
-                self.inference_service = new_service
-                self.inference_service.async_ = True
+        await new_service.generate(["Test"], max_tokens=10)  # Warm up the service
 
-                # Update version tracker
-                self.current_checkpoint_version = new_version
+        # Update our reference to the new service
+        self.agent.inference_service = new_service
+        self.agent.inference_service.async_ = True
 
-                # Reassign to agent
-                self.agent.inference_service = self.inference_service
+        # Update version tracker
+        self.current_checkpoint_version = new_version
 
-                print(f"Inference service updated to checkpoint v{new_version}")
-
-        except Exception as e:
-            print(f"Error updating inference checkpoint: {e}")
+        print(f"Inference service updated to checkpoint v{new_version}")
 
     async def run(self, dataset, num_epochs=3, batches_per_epoch=10):
         """Run the async off-policy training pipeline."""
@@ -813,12 +908,19 @@ async def main():
     inference_gpus = kt.Compute(
         gpus="1",
         image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
-            "uv pip install --system --break-system-packages --no-deps -r kubetorch-examples/rl_grpo/requirements-inference.txt"
+            "uv pip install --system --break-system-packages --no-deps -r async_grpo/requirements-inference.txt"
         ),
         shared_memory_limit="2Gi",
         launch_timeout=1200,
         secrets=["huggingface"],
-    )  # .autoscale(initial_scale=1, min_scale=1, max_scale=5, concurrency=64)
+        concurrency=1,
+    ).autoscale(
+        initial_scale=1,
+        min_scale=1,
+        max_scale=5,
+        concurrency=1,  # vLLM LLM class doesn't support concurrent requests well so we queue
+        target=1,  # Scale up as soon as there's a queue (aggressive scaling)
+    )
 
     # Setup training service compute
     print("Setting up training service compute...")
@@ -833,7 +935,7 @@ async def main():
 
     # Deploy services in parallel
     print("Deploying inference and training services in parallel...")
-    inference_task = kt.cls(vLLM).to_async(inference_gpus, get_if_exists=True)
+    inference_task = kt.cls(vLLM).to_async(inference_gpus)
     train_task = kt.cls(GRPOTrainer).to_async(train_gpus)
 
     inference_service, train_service = await asyncio.gather(inference_task, train_task)
@@ -855,12 +957,13 @@ async def main():
     # Create and run pipeline
     pipeline = AsyncOffPolicyGRPO(
         train_service=train_service,
-        inference_service=inference_service,
         agent=agent,
         buffer=buffer,
         batch_size=batch_size,
         num_generations=num_generations,
         checkpoint_update_interval=5,  # Update checkpoint every 5 steps for testing
+        min_buffer_size=100,  # Try to maintain at least 100 trajectories
+        max_concurrent_batches=2,  # Start conservatively with 2 concurrent batches
     )
 
     await pipeline.run(
