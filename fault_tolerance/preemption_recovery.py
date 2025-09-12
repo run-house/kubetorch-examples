@@ -10,9 +10,6 @@ import time
 from pathlib import Path
 from typing import Dict
 
-# Configure NCCL to be more resilient to failures
-# os.environ["NCCL_TIMEOUT"] = "30"  # 30 second timeout for NCCL operations
-# os.environ["NCCL_HEARTBEAT_TIMEOUT_SEC"] = "10"  # Heartbeat timeout
 os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "10"
 os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"  # Disable watchdog killing process
 os.environ["NCCL_ABORT_ON_ERROR"] = "1"

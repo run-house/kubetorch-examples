@@ -1,7 +1,7 @@
 # ## Distributed Training with DLRM and Ray
 # This script demonstrates how to set up a distributed training pipeline using PyTorch, DLRM, MovieLens, and AWS S3.
 # The training pipeline involves initializing a distributed model, loading data from S3, and saving model checkpoints back to S3.
-# The data was preprocessed in the prior step with Ray Data.
+# The data was preprocessed in the prior step with Ray Data; you can see that code in the linked GitHub repo.
 import logging
 
 import boto3
