@@ -1,8 +1,8 @@
 # # XGBoost with a GPU
-# In this example, we define a simple Trainer class that encapsulates XGBoost training, with
-# basic load_data, preprocess, and train methods that you can easily imagine as your own.
-# Then, in `main``, we define compute and layer on some pip installs while requesting a GPU.
-# We dispatch this Trainer class to that remote compute and then call against it as if the remote
+# In this example, we define a simple `Trainer` class that encapsulates XGBoost training, with
+# basic data loading, preprocessing, and training methods that you can easily imagine as your own.
+# Then, in `main`, we define compute and layer on some pip installs while requesting a GPU.
+# We dispatch this `Trainer`` class to that remote compute and then call against it as if the remote
 # class was local; the remote class holds state and can be used to test the model immediately after
 # training as well.
 
@@ -12,7 +12,7 @@ import xgboost as xgb
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.model_selection import train_test_split
 
-# ## First we encapsulate XGB training in a class
+# ## XGB Trainer Class
 # We will send this training class to a remote instance with a GPU with Kubetorch
 class Trainer:
     def __init__(self):
@@ -81,10 +81,10 @@ class Trainer:
         self.model.load_model(path)
 
 
-# ## Set up Runhouse primitives
+# ## Launch Compute and Execute Training
 #
 # Now, we define the main function that will run locally when we run this script and set up
-# our Runhouse module on a remote cluster. First, we create a cluster with the desired instance type and provider.
+# our Kubetorch module on a remote cluster. First, we create a cluster with the desired instance type and provider.
 if __name__ == "__main__":
     img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
         ["numpy > 2.0.0", "xgboost", "pandas", "scikit-learn", "tensorflow"]

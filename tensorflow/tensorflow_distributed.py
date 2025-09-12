@@ -1,7 +1,7 @@
 # # TensorFlow Multi-node Distributed Training
 # A basic example showing how to use Kubetorch to Pythonically run a TensorFlow distributed training script on
-# multiple GPUs. We use the TF_CONFIG environment variable to set up the distributed training environment, and
-# create a separate worker (env) for each rank. We then call the replicas concurrently to trigger coordinated
+# multiple GPUs. We use the `TF_CONFIG` environment variable to set up the distributed training environment, and
+# create a separate worker for each rank. We then call the replicas concurrently to trigger coordinated
 # multi-node training. We're using two single-GPU instances (and therefore two ranks) with the
 # MultiWorkerMirroredStrategy, but this same strategy could be used for other TensorFlow distributed strategies.
 #
@@ -17,7 +17,6 @@ import kubetorch as kt
 import tensorflow as tf
 
 
-# ## Define the TensorFlow distributed training logic
 # This is the function that will be run on each worker. It initializes the distributed training environment,
 # creates a simple model and optimizer, and runs a training loop.
 def train_process():

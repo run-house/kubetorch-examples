@@ -32,7 +32,7 @@ if __name__ == "__main__":
     is_alive_response = sandbox.is_alive()
     print("Is the runtime alive? {is_alive_response.is_alive}")
 
-    # echo a message to the runtime
+    # Echo a message to the runtime
     echo_response = sandbox.execute(
         Command(command="echo 'Hello, Swerex!'", shell=True)
     )

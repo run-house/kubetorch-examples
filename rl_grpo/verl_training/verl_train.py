@@ -1,10 +1,12 @@
-# # RL with VERL
+# # RL with `verl`
 # In this example, we will show you how simple it is to launch an RL training with
-# VERL using Kubetorch and Ray.
-
+# `verl` using Kubetorch and Ray.
+#
+# ::youtube[verl]{url="https://youtu.be/-oz49qt_uSM"}
+#
 # There are two main components here:
-# * A run_grpo function which we will run on a Ray cluster that we bring up in `main()`
-# * The verl PPO trainer which we will call with our config as-is once all the data and model
+# * A `run_grpo`` function which we will run on a Ray cluster that we bring up in `main()`
+# * The `verl` PPO trainer which we will call with our config as-is once all the data and model
 # have been downloaded.
 
 import os
@@ -25,7 +27,7 @@ def run_grpo(cfg):
     with initialize_config_module(
         config_module="verl.trainer.config", version_base="1.1"
     ):
-        base_config = compose(config_name="ppo_trainer")  # Grab from verl
+        base_config = compose(config_name="ppo_trainer")
         with open_dict(base_config):
             cfg = OmegaConf.merge(
                 base_config, cfg
@@ -68,5 +70,5 @@ def main(cfg):
 
 
 if __name__ == "__main__":
-    verl_config = OmegaConf.load("config.yaml")
+    verl_config = OmegaConf.load("config.yaml")  # See on GitHub
     main(cfg=verl_config)

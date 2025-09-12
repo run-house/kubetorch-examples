@@ -2,8 +2,11 @@
 # We will use BGE to embed a large amount of text. We start with a regular class
 # that defines a few methods to load, tokenize, and embed the datasets. Then, we take this class
 # and dispatch it to remote compute as an autoscaling service, and call that service in parallel
-# across a few threads to process our data. In practice, you'd want to re-implement the load_data()
-# and save_embeddings() methods; we use a public dataset from HuggingFace for convenience.
+# across a few threads to process our data.
+
+# ## BGEEmbedder Class
+# Define the embedder class. Here we use a public dataset from HuggingFace for convenience.
+# In practice, you'd want to re-implement the `load_data()` and `save_embeddings()` methods.
 
 import kubetorch as kt
 

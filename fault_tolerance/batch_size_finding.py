@@ -4,11 +4,10 @@
 #
 # In this example, we demonstrate how to handle out-of-memory (OOM) errors during
 # distributed training by automatically adjusting the batch size.
-# But more generically, this shows how Kubetorch gives you powerful programmatic control
+# More generically, this shows how Kubetorch gives you powerful programmatic control
 # and fault tolerance over your training and other ML jobs. You can launch nodes conservatively,
-# catch OOMs, and then relaunch on larger compute (instead of always requesting maximum resources);
-# or you can automatically set up retries with different configs; or you can tolerate pre-emptions;
-# etc.
+# catch OOMs, and then relaunch on larger compute (instead of always requesting maximum resources).
+# Or, you can automatically set up retries with different configs, tolerate pre-emptions, and more.
 import time
 
 import kubetorch as kt

@@ -7,11 +7,11 @@
 #
 # There are three main components here:
 # * A code agent class, which will run code and return stdout/err + success/fail
-# * A training encapsulation class that launches the code agent on 0.5 CPUs on separate
+# * A training encapsulation class, which launches the code agent on 0.5 CPUs on separate
 # compute on the same Kubernetes cluster, instantiates a TRL trainer, loads data (dummy),
 # and then runs the training.
-# * Our main, which sends our trainer to GPUs on Kubernetes, instantiates it
-# there with specific configs (here, hardcoded; but you should use a config system).
+# * Our main, which sends our trainer to GPUs on Kubernetes and instantiates it
+# with specific configs.
 #
 # An important thing to note is that this CodeAgent runs on its own compute and
 # image, can be called in parallel across many threads, and made to be autoscaling.
@@ -266,7 +266,7 @@ class TRLCodeSandboxTrainer:
 # Running from local or CI or anywhere that runs Python, you can launch the TRL
 # training by defining the compute and image you want to use, and then using
 # `.to()` to send the `TRLCodeSandboxTrainer` to that compute. We hardcode a few
-# configs here for simplicity.
+# configs here for simplicity, but recommend using a config system.
 
 
 def main(grpo_cfg, epochs):

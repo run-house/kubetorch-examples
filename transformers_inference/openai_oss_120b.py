@@ -6,6 +6,7 @@
 # and then you can run `python openai_oss_120b.py` to run main and see how you can call the remote service from
 # any Python script that imports the inference class.
 #
+# ::youtube[OpenAI]{url="https://youtu.be/VCWpCM2m1Hw"}
 #
 # ## Decorate a Regular Inference Class
 # We start with a regular inference class called `OpenAIOSSInference` which has a `generate()` method
