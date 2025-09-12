@@ -395,9 +395,6 @@ class GRPOTrainer:
 
     def save_checkpoint(self):
         """Save the current model checkpoint."""
-        if os.environ.get("RANK", None) != "0":
-            return
-
         checkpoint_path = Path(f"qwen-grpo-checkpoint-{self.steps}-steps")
 
         # Get the underlying model (unwrap DDP if needed)
@@ -413,12 +410,9 @@ class GRPOTrainer:
 
     def deploy_inference_service(self, inference_service):
         """Redeploy the inference service with the latest model checkpoint."""
-        if os.environ.get("RANK", None) != "0":
-            return
-
         if not self.latest_checkpoint:
             print("No checkpoint to deploy")
-            return
+            return inference_service
 
         # We do this from the training service so we can sync the latest checkpoint into the inference service
         # image. We could also just save it to a shared storage location like blob storage and redeploy from within
@@ -550,7 +544,7 @@ async def main():
     batch_size = 4
     num_generations = 4
     num_epochs = 3
-    batches_per_epoch = 5
+    batches_per_epoch = 1
 
     # Load dataset
     print("Loading GSM8K dataset...")
@@ -561,7 +555,7 @@ async def main():
     inference_gpus = kt.Compute(
         gpus="1",
         image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
-            "uv pip install --system --break-system-packages --no-deps -r kubetorch-examples/rl_grpo/requirements-inference.txt"
+            "uv pip install --system --break-system-packages --no-deps -r kubetorch-examples/rl_grpo/basic_grpo/requirements-inference.txt"
         ),
         shared_memory_limit="2Gi",
         launch_timeout=1200,
@@ -581,7 +575,7 @@ async def main():
 
     # Deploy services in parallel
     print("Deploying inference and training services...")
-    inference_task = kt.cls(vLLM).to_async(inference_gpus, get_if_exists=True)
+    inference_task = kt.cls(vLLM).to_async(inference_gpus)
     train_task = kt.cls(GRPOTrainer).to_async(train_gpus)
 
     inference_service, train_service = await asyncio.gather(inference_task, train_task)
@@ -619,19 +613,21 @@ async def main():
         # Save and redeploy checkpoint after each epoch for on-policy training
         if epoch_metrics["num_batches"] > 0:
             print(f"Epoch {epoch + 1} complete. Saving checkpoint...")
-            await train_service.save_checkpoint()
+            await train_service.save_checkpoint(workers=[0])
 
             # Redeploy inference service with new checkpoint for on-policy training
             if epoch < num_epochs - 1:  # Don't redeploy on last epoch
                 print("Redeploying inference service with new checkpoint...")
-                new_service = await train_service.deploy_inference_service(
-                    inference_service,
-                    serialization="pickle",
-                )
-                if new_service:
-                    inference_service = new_service
-                    inference_service.async_ = True
-                    agent.inference_service = inference_service
+                new_service = (
+                    await train_service.deploy_inference_service(
+                        inference_service,
+                        serialization="pickle",
+                        workers=[0],
+                    )
+                )[0]
+                inference_service = new_service
+                inference_service.async_ = True
+                agent.inference_service = inference_service
 
     print("\nTraining complete!")
 
