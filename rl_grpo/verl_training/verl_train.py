@@ -1,12 +1,14 @@
-# # RL with `verl`
+# # Reinforcement Learning (RL) with verl
 # In this example, we will show you how simple it is to launch an RL training with
-# `verl` using Kubetorch and Ray.
+# `verl` using Kubetorch and Ray. [verl](https://github.com/volcengine/verl) is a popular
+# RL training library for large language models (LLMs).
 #
 # ::youtube[verl]{url="https://youtu.be/-oz49qt_uSM"}
 #
-# There are two main components here:
+# ## Overview
+# There are two main components used in this training example:
 # * A `run_grpo` function which we will run on a Ray cluster that we bring up in `main()`
-# * The `verl` PPO trainer which we will call with our config as-is once all the data and model
+# * The `verl` PPO trainer, `run_ppo`, which we will call with our config as-is once all the data and model
 # have been downloaded.
 
 import os
@@ -19,6 +21,7 @@ from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, open_dict
 from verl.trainer.main_ppo import run_ppo
 
+# ## Training Function
 # This is the function we will run on remote compute to start the GRPO
 # training process. It will use the configuration passed to it (merging with
 # the baseline verl config), and we show downloading the data before executing the training.
@@ -46,9 +49,10 @@ def run_grpo(cfg):
         run_ppo(cfg)
 
 
+# ## Running with Kubetorch
 # We define the main function that sets up the Kubetorch compute environment
-# and sends our run_grpo function to be executed on the remote compute which is a Ray
-# cluster with num nodes and gpus per node as per our config.
+# and sends our `run_grpo` function to be executed on the remote compute which is a Ray
+# cluster with num nodes and GPUs per node as per our config.
 def main(cfg):
     img = (
         kt.Image(
