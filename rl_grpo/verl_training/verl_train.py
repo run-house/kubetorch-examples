@@ -1,4 +1,4 @@
-# # Reinforcement Learning (RL) with verl
+# # Reinforcement Learning (RL) Training with verl
 # In this example, we will show you how simple it is to launch an RL training with
 # `verl` using Kubetorch and Ray. [verl](https://github.com/volcengine/verl) is a popular
 # RL training library for large language models (LLMs).
