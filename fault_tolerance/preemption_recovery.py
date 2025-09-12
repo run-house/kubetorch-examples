@@ -10,10 +10,6 @@ import time
 from pathlib import Path
 from typing import Dict
 
-os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "10"
-os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"  # Disable watchdog killing process
-os.environ["NCCL_ABORT_ON_ERROR"] = "1"
-
 import kubetorch as kt
 import torch
 import torch.nn.functional as F
@@ -21,12 +17,15 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader, DistributedSampler
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
+# Configure NCCL to be more resilient to failures
 
+os.environ["TORCH_NCCL_NONBLOCKING_TIMEOUT"] = "10"
+os.environ["NCCL_ASYNC_ERROR_HANDLING"] = "0"  # Disable watchdog killing process
+os.environ["NCCL_ABORT_ON_ERROR"] = "1"
+
+# ## BERT Trainer Class
+# A concise BERT fine-tuning trainer that handles distributed training and preemption recovery.
 class BERTTrainer:
-    """
-    A concise BERT fine-tuning trainer that handles distributed training and preemption recovery.
-    """
-
     def __init__(
         self,
         model_name: str = "bert-base-uncased",
@@ -298,12 +297,11 @@ class BERTTrainer:
         }
 
 
+# ## Main Definition
+# Main entry point that sets up distributed training and handles preemption recovery.
+# The training can be interrupted at any point and will automatically resume from
+# the last checkpoint when restarted.
 def main():
-    """
-    Main entry point that sets up distributed training and handles preemption recovery.
-    The training can be interrupted at any point and will automatically resume from
-    the last checkpoint when restarted.
-    """
     parser = argparse.ArgumentParser(
         description="PyTorch Distributed Training with Preemption Recovery"
     )

@@ -10,7 +10,7 @@
 # to the launched service is vectorized over it's replicas), inference is launched as a autoscaling
 # service with different underlying image.
 #
-# Disclaimer: this is not an optimized RL training example, which takes place in other examples.
+# Note: this is not an optimized RL training example, which takes place in other examples.
 # Instead, this is simplified, synchronous loops to show how Kubetorch
 # lets you define resources and services in code, launch them, and call into each.
 import asyncio

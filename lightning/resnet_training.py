@@ -21,9 +21,9 @@ from torch.utils.data import DataLoader
 from torch.utils.data.distributed import DistributedSampler
 from torchvision import models
 
-# ## ResNet152 Lightning Module and Data Module
+# ## ResNet152 Lightning Module
 # The ResNet152 Lightning Module is a standard PyTorch Lightning module that defines the ResNet152 model, the training and validation steps,
-# and the optimizer and scheduler. The Data Module is a standard PyTorch Lightning data module that defines the training and validation dataloaders.
+# and the optimizer and scheduler.
 class ResNet152LitModule(L.LightningModule):
     def __init__(
         self,
@@ -95,6 +95,8 @@ class ResNet152LitModule(L.LightningModule):
         super().teardown(stage)
 
 
+# ## Data Module
+# The Data Module is a standard PyTorch Lightning data module that defines the training and validation dataloaders.
 class ImageNetDataModule(L.LightningDataModule):
     def __init__(self, train_data_path, val_data_path, batch_size, download_data=True):
         super().__init__()
@@ -219,9 +221,9 @@ class ResNetTrainer:
 
 
 # ## Launch Compute and Run the Training
-# We will now dispatch and run the ResNet training on multiple nodes.
-# The data we use here is a sampled, preprocessed set of images from the ImageNet dataset. You can
-# see the preprocessing script at examples/pytorch-resnet/imagenet_preproc.py
+# We will now dispatch and run the ResNet training on multiple nodes. The data we use here is a
+# sampled, preprocessed set of images from the ImageNet dataset. You can see the preprocessing
+# script at [imagenet_preproc.py](https://github.com/run-house/kubetorch-examples/blob/main/pytorch_ddp/resnet/imagenet_preproc.py).
 def train(init_args, data_args, epochs):
     import logging
 

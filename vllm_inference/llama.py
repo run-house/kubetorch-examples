@@ -1,7 +1,7 @@
 # # Hello World: Deploy an LLM Inference Service
 # This inference _Hello, World_ example walks through deploying an open LLM (Llama 3) to one or more GPUs in the cloud.
 # We'll use [vLLM](https://github.com/vllm-project/vllm) to serve the model due to it's high performance.
-# To deploy the service to your cloud, you'll can simply run `kt deploy llama.py`, and then you can run `python llama.py`
+# To deploy the service to your cloud, you'll can simply run `kt deploy llama.py`. Then, run `python llama.py`
 # to see how you can call the remote service from your local machine.
 #
 # ::youtube[Llama Inference with vLLM]{url="https://www.youtube.com/watch?v=8slAR7459X4"}
