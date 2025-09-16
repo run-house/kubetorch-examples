@@ -2,11 +2,10 @@
 # We will use BGE to embed a large amount of text. We start with a regular class
 # that defines a few methods to load, tokenize, and embed the datasets. Then, we take this class
 # and dispatch it to remote compute as an autoscaling service, and call that service in parallel
-# across a few threads to process our data.
+# to process our data. In practice, you'd want to re-implement the load_data()
+# and save_embeddings() methods; we use a public dataset from HuggingFace for convenience.
 
-# ## BGEEmbedder Class
-# Define the embedder class. Here we use a public dataset from HuggingFace for convenience.
-# In practice, you'd want to re-implement the `load_data()` and `save_embeddings()` methods.
+import asyncio
 
 import kubetorch as kt
 
@@ -58,9 +57,7 @@ class BGEEmbedder:
         inputs = tokenized_dataset["input_ids"]
         return [{"prompt_token_ids": inp} for inp in inputs]
 
-    def embed_dataset(
-        self, dataset_name, text_column_name, split, data_files, batch_size=None
-    ):
+    def embed_dataset(self, dataset_name, text_column_name, split, data_files):
         if self.model is None:
             self.load_model()
 
@@ -98,14 +95,12 @@ if __name__ == "__main__":
         cpus="7",
         memory="25Gi",
         image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3")
-        .pip_install(["vllm"])
-        .run_bash(["pip uninstall pyarrow -y", "pip install pyarrow datasets"]),
+        .run_bash("uv pip install --system --break-system-packages vllm==0.9.0 transformers==4.53.0 datasets"),
         launch_timeout=600,
-        concurrency=1,
-    ).autoscale(min_scale=0, max_scale=replicas)
+    ).autoscale(min_scale=0, max_scale=replicas, concurrency=1)
 
     embedder = kt.cls(BGEEmbedder).to(compute)
-    embedder.load_model()
+    embedder.async_ = True
 
     # Illustrative; you'd manage this elsewhere.
     data_files_list = [
@@ -117,17 +112,12 @@ if __name__ == "__main__":
         "20231101.en/train-00005-of-00041.parquet",
     ]  # ETC
 
-    # Launch parallel threads to call the service N times (one per replica)
-    from concurrent.futures import ThreadPoolExecutor
-    from functools import partial
+    async def process_files():
+        tasks = [
+            embedder.embed_dataset("wikimedia/wikipedia", "text", "train", data_file)
+            for data_file in data_files_list
+        ]
+        return await asyncio.gather(*tasks)
 
-    with ThreadPoolExecutor(max_workers=replicas) as executor:
-        embed_file = partial(
-            embedder.embed_dataset,
-            "wikimedia/wikipedia",
-            "text",
-            "train",
-        )
-        results = list(executor.map(embed_file, data_files_list))
-
+    results = asyncio.run(process_files())
     print(results)
