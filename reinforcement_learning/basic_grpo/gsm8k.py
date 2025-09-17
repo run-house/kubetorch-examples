@@ -555,7 +555,7 @@ async def main():
     inference_gpus = kt.Compute(
         gpus="1",
         image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
-            "uv pip install --system --break-system-packages --no-deps -r kubetorch-examples/rl_grpo/basic_grpo/requirements-inference.txt"
+            "uv pip install --system --break-system-packages --no-deps -r kubetorch-examples/reinforcement_learning/basic_grpo/requirements-inference.txt"
         ),
         shared_memory_limit="2Gi",
         launch_timeout=1200,
