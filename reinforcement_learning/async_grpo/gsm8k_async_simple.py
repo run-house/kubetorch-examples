@@ -583,6 +583,7 @@ async def main():
     ).autoscale(
         min_scale=2,
     )
+    inference_service_task = kt.cls(vLLM).to_async(inference_compute)
 
     # Setup training service - distributed across 2 GPUs
     train_compute = kt.Compute(
@@ -594,11 +595,10 @@ async def main():
         launch_timeout=600,
         allowed_serialization=["json", "pickle"],
     ).distribute("pytorch", workers=2)
+    train_service_task = kt.cls(GRPOTrainer).to_async(train_compute)
 
     # Deploy services in parallel - Kubetorch handles the orchestration
     print("Deploying services...")
-    inference_service_task = kt.cls(vLLM).to_async(inference_compute)
-    train_service_task = kt.cls(GRPOTrainer).to_async(train_compute)
     inference_service, train_service = await asyncio.gather(
         inference_service_task, train_service_task
     )
