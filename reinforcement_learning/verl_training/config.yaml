@@ -1,13 +1,14 @@
 algorithm:
   adv_estimator: grpo
   use_kl_in_reward: false
+  norm_adv_by_std_in_grpo: false
 
 data:
-  hf_data_name: DigitalLearningGmbH/MATH-lighteval
-  train_files: /data/math/train.parquet
-  val_files: /data/math/test.parquet
-  train_batch_size: 64
-  max_prompt_length: 512
+  hf_data_name: openai/gsm8k
+  train_files: /data/gsm8k/train.parquet
+  val_files: /data/gsm8k/test.parquet
+  train_batch_size: 256
+  max_prompt_length: 1024
   max_response_length: 1024
   filter_overlong_prompts: true
   truncation: error
@@ -26,39 +27,41 @@ actor_rollout_ref:
   actor:
     optim:
       lr: 3e-6
-    ppo_mini_batch_size: 64
-    ppo_micro_batch_size_per_gpu: 4
-    use_kl_loss: true
+    ppo_mini_batch_size: 128
+    ppo_micro_batch_size_per_gpu: 16
     kl_loss_coef: 0.01
     kl_loss_type: low_var_kl
     entropy_coeff: 0
+    loss_agg_mode: seq-mean-token-sum-norm
+    use_kl_loss: False
     fsdp_config:
       model_dtype: bfloat16
       param_offload: false
       optimizer_offload: false
 
   rollout:
-    log_prob_micro_batch_size_per_gpu: 4
+    log_prob_micro_batch_size_per_gpu: 32
     tensor_model_parallel_size: 1
     name: vllm
-    gpu_memory_utilization: 0.6
+    gpu_memory_utilization: 0.8
     enable_chunked_prefill: false
     enforce_eager: false
     free_cache_engine: false
-    n: 5
+    n: 4
 
   ref:
-    log_prob_micro_batch_size_per_gpu: 4
+    log_prob_micro_batch_size_per_gpu: 32
     fsdp_config:
-      param_offload: true
+      param_offload: false
+      model_dtype: bfloat16
 
 trainer:
   critic_warmup: 0
   logger: [console, wandb]
   project_name: 'verl_grpo_example_math'
   experiment_name: 'qwen2_5'
-  n_gpus_per_node: 1
-  nnodes: 4
+  n_gpus_per_node: 8
+  nnodes: 2
   save_freq: 20
   test_freq: 5
   total_epochs: 15

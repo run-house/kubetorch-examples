@@ -1,0 +1,59 @@
+training:
+  # Model settings
+  model_id: "Qwen/Qwen2.5-3B-Instruct"
+  learning_rate: 2.0e-5
+
+  # Training settings
+  num_epochs: 15
+  batch_size: 48
+  num_generations: 6
+  checkpoint_interval: 20
+  test_interval: 5
+
+  # Concurrency limits
+  max_concurrent_training: 1
+  max_concurrent_evals: 20
+
+  # vLLM settings
+  max_tokens: 1024
+  temperature: 0.8
+  top_p: 0.95
+  eval_temperature: 0.4
+
+  # LoRA settings
+  lora_rank: 64
+  lora_alpha: 32
+  lora_dropout: 0.1
+
+  # Timeouts and limits
+  code_timeout: 8
+  eval_samples: 100
+
+compute:
+  # Inference service
+  inference_gpus: "1"
+  inference_min_scale: 4
+  inference_max_model_len: 1024
+  inference_gpu_memory_utilization: 0.8
+  max_num_seqs: 128
+
+  # Training service
+  training_gpus: 4
+  training_workers: 3
+  training_launch_timeout: 600
+
+  # General
+  launch_timeout: 1200
+
+dataset:
+  dataset_name: "newfacade/LeetCodeDataset"
+  train_split: "train"
+  test_split: "test"
+
+reward:
+  success_reward: 1.0
+  failed_run_reward: -1.0
+  name_error_reward: -0.6
+  indent_error_reward: -0.5
+  assertion_error_reward: -0.9
+  other_error_reward: -0.5

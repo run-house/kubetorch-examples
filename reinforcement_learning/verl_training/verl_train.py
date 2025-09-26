@@ -15,7 +15,7 @@ import os
 
 import kubetorch as kt
 import ray
-from download_data import download_data_math, download_model
+from download_data import download_data_gsm8k, download_model
 from hydra import compose, initialize_config_module
 from hydra.core.global_hydra import GlobalHydra
 from omegaconf import OmegaConf, open_dict
@@ -36,7 +36,7 @@ def run_grpo(cfg):
                 base_config, cfg
             )  # Add our local configs propagating to remote
 
-        download_data_math(
+        download_data_gsm8k(
             data_source=cfg.data.hf_data_name,
             train_path=cfg.data.train_files,
             val_path=cfg.data.val_files,
