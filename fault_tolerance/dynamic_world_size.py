@@ -8,6 +8,7 @@ import argparse
 import os
 import threading
 import time
+import warnings
 from pathlib import Path
 from typing import Dict
 
@@ -15,8 +16,12 @@ import kubetorch as kt
 import torch
 import torch.nn.functional as F
 from torch.nn.parallel import DistributedDataParallel as DDP
-from torch.utils.data import DataLoader, DistributedSampler
+from torch.utils.data import DataLoader
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
+
+warnings.filterwarnings(
+    "ignore", message="`resume_download` is deprecated", category=FutureWarning
+)
 
 # Configure NCCL to be more resilient to failures
 
@@ -89,23 +94,65 @@ class BERTTrainer:
         self.optimizer = torch.optim.AdamW(
             self.model.parameters(), lr=self.learning_rate
         )
-        # Create distributed sampler for multi-GPU training
-        sampler = DistributedSampler(
-            self.dataset,
-            num_replicas=self.world_size,
-            rank=self.rank,
-            shuffle=True,
+
+        # ## Collate Function for On-the-Fly Tokenization
+        # Tokenize batches as they're loaded to avoid upfront processing delays
+        def collate_fn(examples):
+            texts = [ex["text"] for ex in examples]
+            labels = torch.tensor([ex["label"] for ex in examples], dtype=torch.long)
+
+            # Tokenize the batch
+            encoding = self.tokenizer(
+                texts,
+                padding="max_length",
+                truncation=True,
+                max_length=128,
+                return_tensors="pt",
+            )
+
+            return {
+                "input_ids": encoding["input_ids"],
+                "attention_mask": encoding["attention_mask"],
+                "label": labels,
+            }
+
+        # ## Distributed Sharding for Streaming Dataset
+        # For streaming datasets, we shard by skipping examples rather than using DistributedSampler
+        # Each rank only processes every Nth example where N is the world size
+        from torch.utils.data import IterableDataset
+
+        class DistributedStreamingWrapper(IterableDataset):
+            def __init__(self, dataset, rank, world_size, epoch=0):
+                self.dataset = dataset
+                self.rank = rank
+                self.world_size = world_size
+                self.epoch = epoch
+
+            def __iter__(self):
+                # Shuffle with fixed seed for this instance
+                dataset_iter = iter(
+                    self.dataset.shuffle(seed=self.epoch, buffer_size=1000)
+                )
+                # Each rank processes every world_size-th example
+                for i, example in enumerate(dataset_iter):
+                    if i % self.world_size == self.rank:
+                        yield example
+
+        # Wrap the streaming dataset for distributed training with fixed epoch
+        distributed_dataset = DistributedStreamingWrapper(
+            self.dataset, self.rank, self.world_size, epoch=self.epoch
         )
 
         self.dataloader = DataLoader(
-            self.dataset,
+            distributed_dataset,
             batch_size=self.batch_size,
-            sampler=sampler,
+            collate_fn=collate_fn,
             drop_last=True,  # Drop last batch if incomplete for DDP
         )
 
     def _get_checkpoint_path(self) -> Path:
         """Get the path for the latest checkpoint."""
+        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
         return self.checkpoint_dir / "checkpoint_latest.pt"
 
     def save_checkpoint(self):
@@ -115,15 +162,12 @@ class BERTTrainer:
         if os.environ.get("LOCAL_RANK", "0") != "0" or self.latest_loss is None:
             return
 
-        print(f"Rank {self.rank}: Saving checkpoint at epoch {self.epoch}")
-
         try:
             model_state = (
                 self.model.module.state_dict()
                 if hasattr(self.model, "module")
                 else self.model.state_dict()
             )
-            print(f"Rank {self.rank}: Model state extracted")
 
             checkpoint = {
                 "epoch": self.epoch,
@@ -135,7 +179,9 @@ class BERTTrainer:
             torch.save(checkpoint, temp_path)
             temp_path.rename(checkpoint_path)
 
-            print(f"Checkpoint saved at epoch {self.epoch} to {checkpoint_path}")
+            print(
+                f"Rank {self.rank}: Checkpoint saved at epoch {self.epoch} to {checkpoint_path}"
+            )
 
         except Exception as e:
             print(f"Rank {self.rank}: Failed to save checkpoint: {e}")
@@ -199,58 +245,16 @@ class BERTTrainer:
         torch.distributed.barrier()
 
     def _load_dataset(self):
-        """Load IMDB dataset from HuggingFace for sentiment classification with caching."""
-        import pickle
-
+        """Load IMDB dataset from HuggingFace using streaming for faster startup."""
         from datasets import load_dataset
 
-        # Create cache path for tokenized dataset
-        cache_path = self.checkpoint_dir / "tokenized_imdb_dataset.pkl"
+        print("Loading IMDB dataset with streaming enabled...")
 
-        # Try to load cached tokenized dataset
-        if cache_path.exists():
-            print(f"Loading cached tokenized dataset from {cache_path}")
-            try:
-                with open(cache_path, "rb") as f:
-                    tokenized_dataset = pickle.load(f)
-                print("Successfully loaded cached dataset")
-                return tokenized_dataset
-            except Exception as e:
-                print(f"Failed to load cached dataset: {e}, reprocessing...")
-
-        print("Loading and tokenizing IMDB dataset.")
-
-        # Load IMDB dataset
-        dataset = load_dataset("imdb", split="train")
-
-        # Tokenize the dataset
-        def tokenize_function(examples):
-            return self.tokenizer(
-                examples["text"],
-                padding="max_length",
-                truncation=True,
-                max_length=128,
-                return_tensors="pt",
-            )
-
-        tokenized_dataset = dataset.map(
-            tokenize_function,
-            batched=True,
-            remove_columns=["text"],
-            desc="Tokenizing dataset",
-        )
-        tokenized_dataset.set_format("torch")
-
-        # Save tokenized dataset to cache
-        try:
-            print(f"Saving tokenized dataset to cache at {cache_path}")
-            with open(cache_path, "wb") as f:
-                pickle.dump(tokenized_dataset, f)
-            print("Dataset cached successfully")
-        except Exception as e:
-            print(f"Failed to cache dataset: {e}")
-
-        return tokenized_dataset
+        # ## Streaming Dataset for Fast Startup
+        # Using streaming=True avoids downloading/processing the entire dataset upfront.
+        # This is crucial for elastic training where workers may join/leave frequently.
+        # Tokenization happens on-the-fly in the collate function, eliminating startup delays.
+        return load_dataset("imdb", split="train", streaming=True)
 
     def train(self, epochs: int = 3) -> Dict:
         """
@@ -263,9 +267,6 @@ class BERTTrainer:
             self.model.train()
             epoch_loss = 0
             num_batches = 0
-
-            # Set epoch for distributed sampler
-            self.dataloader.sampler.set_epoch(epoch)
 
             for batch_idx, batch in enumerate(self.dataloader):
                 start_time = time.time()
@@ -345,12 +346,11 @@ def main():
             ["transformers==4.36.0", "datasets"]
         ),
         launch_timeout=600,
-    ).distribute("pytorch", workers=args.workers)
+    ).distribute("pytorch", workers=args.workers, port=12345)
 
     # Create and dispatch the trainer to remote compute
     trainer_args = {
         "model_name": args.model,
-        "checkpoint_dir": "/tmp/bert_checkpoints",
         "batch_size": args.batch_size,
     }
     trainer = kt.cls(BERTTrainer).to(gpus, init_args=trainer_args)
@@ -375,6 +375,7 @@ def main():
             time.sleep(30)  # Update cache every 30 seconds
 
     results = None
+    max_retries = 10
     while completed_epochs < args.epochs:
         try:
             # ## Checkpoint Caching During Training
@@ -386,22 +387,23 @@ def main():
 
             results = trainer.train(epochs=1)
             completed_epochs += 1
-        except kt.WorkerMembershipChanged as e:
+        except (kt.WorkerMembershipChanged, kt.PodTerminatedError) as e:
             # ## Handling World Size Changes
             # When workers are added or removed, Kubetorch raises WorkerMembershipChanged.
             # We respond by:
             # 1. Updating the distributed configuration with the new worker count
             # 2. Re-initializing the trainer on the new set of workers
             # 3. The trainer's _sync_after_restart() ensures all workers have consistent weights
-            if retries >= 3:
+            if retries >= max_retries:
                 print(f"Training failed after {retries} retries. Exiting.")
                 raise e
             retries += 1
-            new_worker_num = len(e.current_ips)
+            new_worker_num = len(gpus.pod_names())
             print(f"World size changed, continuing with {new_worker_num} workers")
             # Reconfigure distributed training with new world size
-            gpus.distribute("pytorch", workers=new_worker_num)
+            gpus.distribute("pytorch", workers=new_worker_num, port=12345 + retries)
             # Re-initialize trainer, which will sync weights across new worker set
+            # Increment the port because sometimes PyTorch can take a few seconds to free it
             trainer = kt.cls(BERTTrainer).to(gpus, init_args=trainer_args)
 
     print("\nTraining completed on all ranks:")
