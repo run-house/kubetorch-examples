@@ -24,17 +24,14 @@ import argparse
 import time
 
 import kubetorch as kt
-
-app = kt.app(name="myrun")
+import torch
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 # ## Define the PyTorch Distributed training logic
 # This is a dummy training function, but you can think of this function as representative of your training entrypoint function,
 # or the a function that will be run on each worker. It initializes the distributed training environment,
 # creates a simple model and optimizer, and runs a dummy training loop for a few epochs.
 def train(epochs, batch_size=32):
-    import torch
-    from torch.nn.parallel import DistributedDataParallel as DDP
-
     torch.distributed.init_process_group(backend="nccl")
     rank = torch.distributed.get_rank()
     print(f"Rank {rank} of {torch.distributed.get_world_size()} initialized")
@@ -79,10 +76,7 @@ def train(epochs, batch_size=32):
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Distributed Training Example")
     parser.add_argument(
-        "--epochs",
-        type=int,
-        default=100,
-        help="number of epochs to train (default: 10)",
+        "--epochs", type=int, default=10, help="number of epochs to train (default: 10)"
     )
     parser.add_argument(
         "--batch-size",
@@ -94,22 +88,12 @@ def main():
 
     gpus = kt.Compute(
         gpus=1,
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").rsync(
-            "random_dir", dest="/kube_play"
-        ),
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3"),
         launch_timeout=600,
-        # namespace="research",
     ).distribute("pytorch", workers=4)
+    train_ddp = kt.fn(train).to(gpus)
 
-    retries = 0
-    while retries <= 3:
-        try:
-            train_ddp = kt.fn(train).to(gpus)
-            results = train_ddp(epochs=args.epochs, batch_size=args.batch_size)
-        except kt.WorkerMembershipChanged as e:
-            new_worker_num = len(e.current_ips)
-            print(f"World size changed, continuing with {new_worker_num} workers")
-            gpus.distribute("pytorch", workers=new_worker_num)
+    results = train_ddp(epochs=args.epochs, batch_size=args.batch_size)
     print(f"Final losses {results}")
 
 
