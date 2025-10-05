@@ -11,7 +11,7 @@ def hello_world(num_prints=1):
 
 
 if __name__ == "__main__":
-    img = kt.Image().pip_install("numpy")
+    img = kt.images.Debian().pip_install("numpy")
     compute = kt.Compute(cpus=1, image=img, inactivity_ttl="15m")
 
     remote_hello = kt.fn(hello_world).to(compute)

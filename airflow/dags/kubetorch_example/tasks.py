@@ -21,7 +21,7 @@ def data_preprocessing_fn():
 
 
 def data_preprocessing(**kwargs):
-    image = kt.Image()
+    image = kt.images.Debian()
     compute = kt.Compute(
         cpus="0.1",
         image=image,

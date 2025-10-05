@@ -46,7 +46,7 @@ if __name__ == "__main__":
     # Define an image which will be installed on each node of compute.
     # An image can include a base Docker image, package installations, setup commands, env vars, and secrets.
     img = (
-        kt.Image()
+        kt.images.Debian()
         .pip_install(
             [
                 "ray[data]",
