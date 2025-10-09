@@ -14,7 +14,7 @@ from swerex.runtime.local import Command, LocalRuntime
 def get_sandbox(name: str):
     cpus = kt.Compute(
         cpus="4",
-        image=kt.Image().pip_install(["swe-rex"]),
+        image=kt.images.Debian().pip_install(["swe-rex"]),
         allowed_serialization=["pickle"],
     )
     runtime = kt.cls(LocalRuntime, name=name).to(cpus, get_if_exists=True)

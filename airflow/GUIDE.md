@@ -164,7 +164,7 @@ The method below is a placeholder to illustrate how you can run each task on an 
 
 ```python
 def data_preprocessing(**kwargs):
-    image = kt.Image()
+    image = kt.images.Debian()
     compute = kt.Compute(
         cpus="0.1",
         image=image,
@@ -194,7 +194,7 @@ def run_training(**kwargs):
     logger.info("Step 2: Run Training")
     compute = kt.Compute(
         gpus="1",
-        image=kt.Image(image_id=PYTORCH_IMAGE_ID),
+        image=kt.images.pytorch("23.10-py3"),
         launch_timeout=600,
         inactivity_ttl="10m",
     )
@@ -227,7 +227,7 @@ def deploy_inference(**kwargs):
     logger.info("Step 3: Deploy Inference")
     checkpoint_path = f"s3://{S3_BUCKET_NAME}/checkpoints/model_final.pth"
     local_checkpoint_path = "/model.pth"
-    img = kt.Image(image_id=PYTORCH_IMAGE_ID).run_bash(
+    img = kt.images.pytorch("23.10-py3").run_bash(
         f"aws s3 cp {checkpoint_path} {local_checkpoint_path}"
     )
     inference_compute = kt.Compute(

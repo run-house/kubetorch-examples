@@ -184,7 +184,7 @@ async def format_prompt(text: str, docs: List[Dict]) -> str:
 # requirements necessary to run the server, as well as which port to run it on. If you want to run the app
 # locally, simply run the file as you would normally, which will skip the deployment step.
 
-lance_fastapi_image = kt.Image().pip_install(
+lance_fastapi_image = kt.images.Debian().pip_install(
     [
         "lancedb>=0.3.0",
         "langchain_community",

@@ -162,7 +162,7 @@ class TRLCodeSandboxTrainer:
         """Start a CodeAgent to run Python in SWE REX sandbox"""
         cpus = kt.Compute(
             cpus="0.5",
-            image=kt.Image().pip_install(["swe-rex", "numpy", "pandas"]),
+            image=kt.images.Debian().pip_install(["swe-rex", "numpy", "pandas"]),
         ).autoscale(min_scale=1, max_scale=5)
 
         return kt.cls(CodeAgent).to(cpus, get_if_exists=True)

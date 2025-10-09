@@ -78,7 +78,7 @@ def download_preproc_and_upload(
 if __name__ == "__main__":
 
     img = (
-        kt.Image()
+        kt.images.Debian()
         .pip_install(
             [
                 "torchvision",
