@@ -6,7 +6,7 @@ import ray
 
 @ray.remote
 def hello_world(x):
-    return f"Hello, {x * x} World!"
+    return f"Hello, {x * x} World Update!"
 
 
 @ray.remote
@@ -35,7 +35,7 @@ def ray_program():
     futures = [c.read.remote() for c in counters]
     print(ray.get(futures))
 
-    time.sleep(5)
+    time.sleep(1)
 
 
 if __name__ == "__main__":

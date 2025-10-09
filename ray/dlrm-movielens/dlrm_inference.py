@@ -64,22 +64,19 @@ if __name__ == "__main__":
     num_nodes = 4
 
     # Define the image again
-    img = (
-        kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3")
-        .pip_install(["datasets", "boto3", "awscli", "ray[data,train]"])
-        .sync_secrets(["aws"])
+    img = kt.Image(image_id="rayproject/ray-ml:nightly-extra-py310").pip_install(
+        ["torch", "datasets", "boto3", "awscli", "ray[data,train]"]
     )
 
-    # Launch the compute, we can reuse the same compute as in the training step, or launch a new one
-    # with fewer nodes.
-    gpu_compute = kt.Compute(gpus=gpus_per_node, image=img)
+    compute = kt.Compute(
+        gpus=gpus_per_node, image=img, secrets=[kt.secret(provider="aws")]
+    ).distribute(
+        "ray",
+        workers=num_nodes,
+    )
 
     # Send the function, and setup Ray on the compute
-    remote_inference = (
-        kt.function(inference_dlrm)
-        .to(gpu_compute)
-        .distribute("ray", num_nodes=num_nodes)
-    )
+    remote_inference = kt.function(inference_dlrm).to(gpu_compute)
 
     # Call the inference which writes the results out to a S3 bucket
     remote_inference(
