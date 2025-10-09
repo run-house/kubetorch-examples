@@ -56,7 +56,7 @@ if __name__ == "__main__":
 
     # Create compute with 8 CPUs and 32GB of memory
     compute = kt.Compute(
-        cpus="2", memory="12Gi", image=img, secrets=[kt.secret(provider="aws")]
+        cpus="2", memory="10Gi", image=img, secrets=[kt.secret(provider="aws")]
     ).distribute(
         "ray",
         workers=workers,
