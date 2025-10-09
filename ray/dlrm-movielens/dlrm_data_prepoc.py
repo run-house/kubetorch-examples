@@ -42,38 +42,28 @@ def preprocess_data(s3_read_path, s3_write_path, filename):
 # Kubetorch syncs the code across and makes it a callable "service" on the remote.
 # This code can be identically placed within an orchestrator (e.g. my_pipeline.yaml) and identical execution will occur.
 if __name__ == "__main__":
-
+    workers = 4
     # Define an image which will be installed on each node of compute.
     # An image can include a base Docker image, package installations, setup commands, env vars, and secrets.
-    img = (
-        kt.images.Debian()
-        .pip_install(
-            [
-                "ray[data]",
-                "pandas",
-                "scikit-learn",
-                "awscli",
-            ]
-        )
-        .sync_secrets(["aws"])
+    img = kt.Image(image_id="rayproject/ray").pip_install(
+        [
+            "ray[data]",
+            "pandas",
+            "scikit-learn",
+            "awscli",
+        ]
     )
 
     # Create compute with 8 CPUs and 32GB of memory
     compute = kt.Compute(
-        cpus="8",
-        memory="32",
-        image=img,
+        cpus="2", memory="10Gi", image=img, secrets=[kt.secret(provider="aws")]
+    ).distribute(
+        "ray",
+        workers=workers,
     )
 
     # Send the preprocess_data function to the remote compute and distribute it with Ray over 4 nodes
-    remote_preprocess = (
-        kt.function(preprocess_data)
-        .to(compute)
-        .distribute(
-            "ray",
-            workers=4,
-        )
-    )
+    remote_preprocess = kt.fn(preprocess_data).to(compute)
 
     # Call the remote function (which uses Ray Data on the Ray cluster we formed)
     s3_raw = "s3://rh-demo-external/dlrm-training-example/raw_data"

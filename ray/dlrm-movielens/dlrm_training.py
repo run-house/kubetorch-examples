@@ -292,14 +292,13 @@ if __name__ == "__main__":
     gpus_per_node = 1
     num_nodes = 4
 
-    img = (
-        kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3")
-        .pip_install(["ray[train]", "datasets", "boto3", "awscli"])
-        .sync_secrets(["aws"])
+    img = kt.Image(image_id="rayproject/ray-ml:nightly-extra-py310").pip_install(
+        ["torch", "ray[train]", "datasets", "boto3", "awscli"]
     )
-    gpus = kt.Compute(gpus=gpus_per_node, image=img).distribute(
-        "ray", workers=num_nodes
-    )
+
+    gpus = kt.Compute(
+        gpus=gpus_per_node, image=img, secrets=[kt.secret(provider="aws")]
+    ).distribute("ray", workers=num_nodes)
 
     remote_trainer = kt.fn(ray_trainer).to(gpus)
 
