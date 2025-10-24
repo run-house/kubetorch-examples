@@ -534,7 +534,7 @@ async def simple_async_grpo(
             # Control parallelism by waiting before scheduling new training tasks, but
             # inference can continue running in the background
             # Increase to allow greater parallelism
-            while len(training_tasks) >= 1:
+            while len(training_tasks) >= 2:
                 print(
                     f"[SCHEDULER] {len(training_tasks)} training tasks in queue, {len(inference_tasks)} inference tasks running"
                 )
@@ -595,7 +595,7 @@ async def main():
         ),
         launch_timeout=600,
         allowed_serialization=["json", "pickle"],
-    ).distribute("pytorch", workers=2)
+    ).distribute("pytorch", workers=4)
     train_service_task = kt.cls(GRPOTrainer).to_async(train_compute)
 
     # Deploy services in parallel - Kubetorch handles the orchestration
@@ -616,10 +616,10 @@ async def main():
         dataset,
         train_service,
         inference_service,
-        num_epochs=2,
-        batch_size=2,
+        num_epochs=5,
+        batch_size=8,
         num_generations=4,
-        checkpoint_interval=5,
+        checkpoint_interval=2,
     )
 
 

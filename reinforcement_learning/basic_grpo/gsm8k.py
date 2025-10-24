@@ -428,7 +428,7 @@ class GRPOTrainer:
         return service
 
 
-# ## Simple synchronous on-policy GRPO training pipeline
+# ## Simple synchronous GRPO training pipeline
 # Both the inference and the training services are happening on Kubernetes, "remote" to
 # this pipeline, but being called into by this pipeline regularly.
 class SyncGRPOPipeline:
@@ -445,7 +445,7 @@ class SyncGRPOPipeline:
         self.num_generations = num_generations
 
     async def train_epoch(self, dataset, num_batches=None):
-        """Run one epoch of synchronous on-policy training."""
+        """Run one epoch of training, synchronously."""
         # Prepare data loader
         indices = np.random.permutation(len(dataset))
         if num_batches:
@@ -455,7 +455,7 @@ class SyncGRPOPipeline:
         total_reward = 0
         num_batches_processed = 0
 
-        # Process batches sequentially for true on-policy training
+        # Process batches sequentially
         for i in range(0, len(indices), self.batch_size):
             batch_indices = indices[i : i + self.batch_size]
             batch_prompts = [dataset[int(idx)]["question"] for idx in batch_indices]
@@ -469,7 +469,7 @@ class SyncGRPOPipeline:
                 expanded_answers.extend([a] * self.num_generations)
 
             try:
-                # Generate completions (on-policy: using current model)
+                # Generate completions
                 completions, token_ids = await self.agent.answer(
                     expanded_prompts,
                     max_tokens=512,
@@ -491,7 +491,7 @@ class SyncGRPOPipeline:
                         print(f"Reward: {rewards[j]}")
                         print(f"True Answer: {expanded_answers[j]}")
 
-                # Train on this batch immediately (on-policy)
+                # Train on this batch immediately
                 metrics_list = await self.train_service.train_batch(
                     prompts=expanded_prompts,
                     completions=completions,
@@ -601,7 +601,7 @@ async def main():
     )
 
     # Training loop
-    print("\nStarting synchronous on-policy GRPO training...")
+    print("\nStarting synchronous GRPO training...")
     for epoch in range(num_epochs):
         print(f"\n=== Epoch {epoch + 1}/{num_epochs} ===")
 
@@ -610,12 +610,12 @@ async def main():
             dataset, num_batches=batches_per_epoch
         )
 
-        # Save and redeploy checkpoint after each epoch for on-policy training
+        # Save and redeploy checkpoint after each epoch
         if epoch_metrics["num_batches"] > 0:
             print(f"Epoch {epoch + 1} complete. Saving checkpoint...")
             await train_service.save_checkpoint(workers=[0])
 
-            # Redeploy inference service with new checkpoint for on-policy training
+            # Redeploy inference service with new checkpoint
             if epoch < num_epochs - 1:  # Don't redeploy on last epoch
                 print("Redeploying inference service with new checkpoint...")
                 new_service = (
