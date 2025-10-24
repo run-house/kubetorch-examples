@@ -455,7 +455,7 @@ class SyncGRPOPipeline:
         total_reward = 0
         num_batches_processed = 0
 
-        # Process batches sequentially 
+        # Process batches sequentially
         for i in range(0, len(indices), self.batch_size):
             batch_indices = indices[i : i + self.batch_size]
             batch_prompts = [dataset[int(idx)]["question"] for idx in batch_indices]
