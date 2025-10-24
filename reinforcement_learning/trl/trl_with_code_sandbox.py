@@ -278,12 +278,12 @@ def main(grpo_cfg, epochs):
         image_id="nvcr.io/nvidia/ai-workbench/python-cuda120:1.0.6"
     ).pip_install(
         [
-            "trl>=0.7.0",
-            "transformers>=4.35.0",
-            "torch>=2.0.0",
-            "datasets>=2.14.0",
-            "accelerate>=0.24.0",
-            "peft>=0.6.0",
+            "'trl>=0.7.0'",
+            "'transformers>=4.35.0'",
+            "'torch>=2.0.0'",
+            "'datasets>=2.14.0'",
+            "'accelerate>=0.24.0'",
+            "'peft>=0.6.0'",
             "swe-rex",
             "rich",
         ]

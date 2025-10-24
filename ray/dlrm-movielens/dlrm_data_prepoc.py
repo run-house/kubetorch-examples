@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # An image can include a base Docker image, package installations, setup commands, env vars, and secrets.
     img = kt.Image(image_id="rayproject/ray").pip_install(
         [
-            "ray[data]",
+            "'ray[data]'",
             "pandas",
             "scikit-learn",
             "awscli",

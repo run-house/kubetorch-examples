@@ -65,8 +65,8 @@ MODEL_URL = "https://huggingface.co/BAAI/bge-large-en-v1.5/resolve/main/onnx/mod
 # per replica, while the `autoscale` API allows us to define the min (scale to zero) and max (5 replicas)
 # copies of our service. Finally the Class we define is helpful, because it enables you to implement rich
 # lazy loading logic or input pre-processing, as we lightly do here.
-triton_img = kt.Image(image_id="nvcr.io/nvidia/tritonserver:25.06-py3").run_bash(
-    "uv pip install --system --break-system-packages transformers==4.53.1 torch==2.7.1 tritonclient[grpc]==2.59.0"
+triton_img = kt.Image(image_id="nvcr.io/nvidia/tritonserver:25.06-py3").pip_install(
+    ["transformers==4.53.1", "torch==2.7.1", "'tritonclient[grpc]==2.59.0'"]
 )
 
 

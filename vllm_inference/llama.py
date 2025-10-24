@@ -25,8 +25,12 @@ import kubetorch as kt
 
 @kt.compute(
     gpus="1",
-    image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3").run_bash(
-        "uv pip install --system --break-system-packages --no-build-isolation flash-attn==2.7.3 vllm==0.9.0 'transformers<4.54.0'"
+    image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3").pip_install(
+        [
+            "--no-build-isolation flash-attn==2.7.3",
+            "vllm==0.9.0",
+            "'transformers<4.54.0'",
+        ]
     ),
     shared_memory_limit="2Gi",  # Recommended by vLLM: https://docs.vllm.ai/en/v0.6.4/serving/deploying_with_k8s.html
     launch_timeout=1200,  # Need more time to load the model
@@ -36,7 +40,6 @@ import kubetorch as kt
     initial_scale=1,
     min_scale=1,
     max_scale=5,
-    concurrency=100,
 )
 class LlamaModel:
     def __init__(self, model_id="meta-llama/Meta-Llama-3-8B-Instruct"):

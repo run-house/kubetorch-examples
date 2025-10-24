@@ -566,8 +566,8 @@ async def main():
     print("Setting up training service compute...")
     train_gpus = kt.Compute(
         gpus=1,
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
-            "uv pip install --system --break-system-packages 'torch>=2.2.0' transformers datasets accelerate"
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").pip_install(
+            ["'torch>=2.2.0'", "transformers", "datasets", "accelerate"]
         ),
         launch_timeout=600,
         allowed_serialization=["pickle", "json"],
