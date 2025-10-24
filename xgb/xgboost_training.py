@@ -87,7 +87,7 @@ class Trainer:
 # our Kubetorch module on a remote cluster. First, we create a cluster with the desired instance type and provider.
 if __name__ == "__main__":
     img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
-        ["numpy > 2.0.0", "xgboost", "pandas", "scikit-learn", "tensorflow"]
+        ["'numpy > 2.0.0'", "xgboost", "pandas", "scikit-learn", "tensorflow"]
     )
 
     cluster = kt.Compute(

@@ -576,8 +576,8 @@ async def main():
     # Setup inference service - single GPU with async engine
     inference_compute = kt.Compute(
         gpus="1",
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").pip_install(
-            ["--no-deps -r async_grpo/requirements-inference.txt"]
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").run_bash(
+            "uv pip install --system --break-system-packages --no-deps -r async_grpo/requirements-inference.txt"
         ),
         launch_timeout=1200,
     ).autoscale(
@@ -590,7 +590,11 @@ async def main():
         gpus=1,
         image=kt.Image(image_id="nvcr.io/nvidia/pytorch:25.04-py3").pip_install(
             [
-                "'torch>=2.2.0' transformers==4.56.1 datasets==4.1.0 accelerate==1.10.1 peft==0.17.1"
+                "'torch>=2.2.0'",
+                "transformers==4.56.1",
+                "datasets==4.1.0",
+                "accelerate==1.10.1",
+                "peft==0.17.1",
             ]
         ),
         launch_timeout=600,

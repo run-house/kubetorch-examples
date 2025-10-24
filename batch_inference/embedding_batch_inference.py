@@ -94,8 +94,8 @@ if __name__ == "__main__":
         gpus="1",
         cpus="7",
         memory="25Gi",
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3").run_bash(
-            "uv pip install --system --break-system-packages vllm==0.9.0 transformers==4.53.0 datasets"
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:24.08-py3").pip_install(
+            ["vllm==0.9.0", "transformers==4.53.0", "datasets"]
         ),
         launch_timeout=600,
     ).autoscale(min_scale=0, max_scale=replicas, concurrency=1)

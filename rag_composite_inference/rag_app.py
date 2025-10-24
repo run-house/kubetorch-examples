@@ -189,7 +189,7 @@ lance_fastapi_image = kt.images.Debian().pip_install(
         "lancedb>=0.3.0",
         "langchain_community",
         "langchain_text_splitters",
-        "fastapi[standard]",
+        "'fastapi[standard]'",
         "bs4",
     ]
 )

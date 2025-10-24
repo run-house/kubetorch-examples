@@ -85,7 +85,7 @@ if __name__ == "__main__":
                 "Pillow",
                 "datasets",
                 "boto3",
-                "s3fs>=2024.10.0",
+                "'s3fs>=2024.10.0'",
             ]
         )
         .sync_secrets(["aws", "huggingface"])
