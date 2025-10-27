@@ -293,7 +293,7 @@ if __name__ == "__main__":
     num_nodes = 4
 
     img = kt.Image(image_id="rayproject/ray-ml:nightly-extra-py310").pip_install(
-        ["torch", "ray[train]", "datasets", "boto3", "awscli"]
+        ["torch", "'ray[train]'", "datasets", "boto3", "awscli"]
     )
 
     gpus = kt.Compute(

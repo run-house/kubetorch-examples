@@ -65,7 +65,7 @@ if __name__ == "__main__":
 
     # Define the image again
     img = kt.Image(image_id="rayproject/ray-ml:nightly-extra-py310").pip_install(
-        ["torch", "datasets", "boto3", "awscli", "ray[data,train]"]
+        ["torch", "datasets", "boto3", "awscli", "'ray[data,train]'"]
     )
 
     compute = kt.Compute(
