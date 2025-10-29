@@ -1,13 +1,8 @@
-# Parallel Batch Inference with DeepSeek OCR (Memory-Optimized)
+# Parallel Batch Inference with DeepSeek OCR
 # In this example, we launch a horizontal scaling OCR service (here, not autoscaled, but easily made so)
-# * Downloads from Google blob storage (GCS) directly to memory (no disk I/O)
-# * Automatic parallelism and load balancing via asyncio
+# * Downloads from Google blob storage (GCS) directly to memory
+# * Automatic parallelism and load balancing
 # * Built-in progress tracking and fault tolerance
-#
-# Optimizations vs original:
-# * Streams images through memory instead of saving to disk
-# * No file write/read/delete overhead
-# * Each GPU worker independently processes requests
 #
 # Compare against the examples in /ray/ray_ocr
 #
@@ -30,7 +25,7 @@ app = kt.app(cpus=1)
 class SimpleOCR:
     """Simple OCR processor using DeepSeek-OCR with vLLM."""
 
-    def __init__(self):
+    def __init__(self, creds_path):
         # Kill any residual vLLM process in GPU memory upon restart
         try:
             result = subprocess.run(
@@ -61,9 +56,7 @@ class SimpleOCR:
         )
         self.llm = AsyncLLMEngine.from_engine_args(engine_args)
 
-        os.environ[
-            "GOOGLE_APPLICATION_CREDENTIALS"
-        ] = "/Users/paulyang/Downloads/runhouse-test-8ad14c2b4edf.json"
+        os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
         from google.cloud import storage
 
         self.client = storage.Client()
@@ -219,7 +212,7 @@ async def main():
         concurrency=args.scale * args.concurrency,
         metric="concurrency",
     )
-    ocr = kt.cls(SimpleOCR).to(compute)
+    ocr = kt.cls(SimpleOCR).to(compute, init_args={"creds_path": args.creds_path})
 
     ocr.async_ = True
 
