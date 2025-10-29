@@ -69,8 +69,7 @@ class SimpleOCR:
         self.client = storage.Client()
 
     async def download_and_infer(self, gcs_path: str) -> Dict:
-        """Download and infer without touching disk - stream through memory."""
-        image = self.download_to_memory(gcs_path)
+        image = await self.download_to_memory(gcs_path)
         print("Downloaded ", gcs_path)
 
         result = await self.run_inference(gcs_path, image)
@@ -79,20 +78,14 @@ class SimpleOCR:
         self.write_to_gcs(result, gcs_path)
         return result
 
-    def download_to_memory(self, gcs_path: str):
-        """Download GCS file directly to memory as PIL Image."""
+    async def download_to_memory(self, gcs_path: str):
         import io
 
         from PIL import Image
 
         bucket_name, blob_name = gcs_path[5:].split("/", 1)
-
         blob = self.client.bucket(bucket_name).blob(blob_name)
-
-        # Download to bytes in memory
-        image_bytes = blob.download_as_bytes()
-
-        # Convert bytes to PIL Image
+        image_bytes = await asyncio.to_thread(blob.download_as_bytes)
         image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
         return image
 
@@ -264,6 +257,7 @@ async def main():
             print(f"Task error: {e}")
 
     print(f"\nDone: {len(results)}/{len(all_files)} in {time.time()-start_time:.1f}s")
+    # print(results[0])
     # ocr.teardown()
 
 
