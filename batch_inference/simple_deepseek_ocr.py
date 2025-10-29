@@ -220,7 +220,7 @@ async def main():
         secrets=[
             kt.Secret(
                 name="gcp-dataaccess",
-                path="/Users/paulyang/Downloads/runhouse-test-8ad14c2b4edf.json",
+                path=args.creds_path,
             )
         ],
     ).autoscale(
