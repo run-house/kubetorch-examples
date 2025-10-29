@@ -1,10 +1,15 @@
-# Parallel Batch Inference with DeepSeek OCR
+# Parallel Batch Inference with DeepSeek OCR (Memory-Optimized)
 # In this example, we launch a horizontal scaling OCR service (here, not autoscaled, but easily made so)
-# * Downloads from Google blob storage (GCS) into Ray object store
-# * Automatic parallelism and load balancing
+# * Downloads from Google blob storage (GCS) directly to memory (no disk I/O)
+# * Automatic parallelism and load balancing via asyncio
 # * Built-in progress tracking and fault tolerance
 #
-# Compare against the example for /ray/ray_ocr/ray_data_ocr.py
+# Optimizations vs original:
+# * Streams images through memory instead of saving to disk
+# * No file write/read/delete overhead
+# * Each GPU worker independently processes requests
+#
+# Compare against the examples in /ray/ray_ocr
 #
 # Run with:
 # python simple_deepseek_ocr.py --scale 4 --input-dir gs://rh_demo_image_data/sample_images --creds-path <path to service account json>
@@ -56,56 +61,53 @@ class SimpleOCR:
         )
         self.llm = AsyncLLMEngine.from_engine_args(engine_args)
 
-    async def download_and_infer(self, gcs_path: str, local_dir: str) -> Dict:
-        os.makedirs(local_dir, exist_ok=True)
-        local_path = self.download_single(gcs_path, local_dir)
-        print("Downloaded ", gcs_path)
-
-        result = await self.run_inference(local_path)
-        print("Generated", gcs_path)
-
-        self.write_to_gcs(result, gcs_path)
-        # return result
-
-    def download_single(self, gcs_path: str, local_dir: str) -> str:
-        from google.cloud import storage
-
         os.environ[
             "GOOGLE_APPLICATION_CREDENTIALS"
         ] = "/Users/paulyang/Downloads/runhouse-test-8ad14c2b4edf.json"
+        from google.cloud import storage
+
+        self.client = storage.Client()
+
+    async def download_and_infer(self, gcs_path: str) -> Dict:
+        """Download and infer without touching disk - stream through memory."""
+        image = self.download_to_memory(gcs_path)
+        print("Downloaded ", gcs_path)
+
+        result = await self.run_inference(gcs_path, image)
+        print("Generated", gcs_path)
+
+        self.write_to_gcs(result, gcs_path)
+        return result
+
+    def download_to_memory(self, gcs_path: str):
+        """Download GCS file directly to memory as PIL Image."""
+        import io
+
+        from PIL import Image
 
         bucket_name, blob_name = gcs_path[5:].split("/", 1)
-        filename = Path(blob_name).name
-        local_path = os.path.join(local_dir, filename)
-        temp_path = local_path + ".downloading"
 
-        client = storage.Client()
-        client.bucket(bucket_name).blob(blob_name).download_to_filename(temp_path)
+        blob = self.client.bucket(bucket_name).blob(blob_name)
 
-        os.rename(temp_path, local_path)
-        return local_path
+        # Download to bytes in memory
+        image_bytes = blob.download_as_bytes()
+
+        # Convert bytes to PIL Image
+        image = Image.open(io.BytesIO(image_bytes)).convert("RGB")
+        return image
 
     def write_to_gcs(self, result: Dict, output_gcs_path: str):
         pass  # Implement something to write out results
 
-    async def run_inference(self, image_path: str) -> Dict:
+    async def run_inference(self, gcs_path: str, image) -> Dict:
+        """Run inference on PIL Image in memory - no disk I/O."""
         from uuid import uuid4
 
-        from PIL import Image
         from vllm import SamplingParams
 
         start_time = time.time()
 
         try:
-            if not os.path.exists(image_path):
-                return {
-                    "file": image_path,
-                    "status": "error",
-                    "error": "File not found",
-                    "processing_time": time.time() - start_time,
-                }
-
-            image = Image.open(image_path).convert("RGB")
             prompt = {
                 "prompt": "<image>\n<|grounding|>Convert the document to markdown.",
                 "image": image,
@@ -134,24 +136,19 @@ class SimpleOCR:
 
             text = final_output.outputs[0].text
             result = {
-                "file": image_path,
+                "file": gcs_path,
                 "status": "success",
                 "text": text,
                 "processing_time": time.time() - start_time,
             }
 
-            os.unlink(image_path)  # Delete file after processing
             return result
 
         except Exception as e:
-            print(f"Processing error for {image_path}: {e}")
-            try:
-                os.unlink(image_path)
-            except:
-                pass
+            print(f"Processing error for {gcs_path}: {e}")
 
             return {
-                "file": image_path,
+                "file": gcs_path,
                 "status": "error",
                 "error": str(e),
                 "processing_time": time.time() - start_time,
@@ -237,8 +234,6 @@ async def main():
     all_files = get_file_names(args.input_dir)
     print(f"Found {len(all_files)} files")
 
-    local_dir = "/tmp/ocr_processing"
-
     semaphore = asyncio.Semaphore(
         args.scale * args.concurrency * 1.5
     )  # Don't blow up with too many tasks, but saturate
@@ -247,11 +242,11 @@ async def main():
         async with semaphore:
             try:
                 return await asyncio.wait_for(
-                    ocr.download_and_infer(gcs_file, local_dir, stream_logs=False),
+                    ocr.download_and_infer(gcs_file, stream_logs=False),
                     timeout=600,
                 )
-            except Exception:
-                return {"file": gcs_file, "status": "error", "error": "timeout/failed"}
+            except Exception as e:
+                return {"file": gcs_file, "status": "error", "error": str(e)}
 
     tasks = [run_file(file) for file in all_files]
     results = []
@@ -269,6 +264,7 @@ async def main():
             print(f"Task error: {e}")
 
     print(f"\nDone: {len(results)}/{len(all_files)} in {time.time()-start_time:.1f}s")
+    # ocr.teardown()
 
 
 if __name__ == "__main__":
