@@ -4,6 +4,8 @@
 # * Automatic parallelism and load balancing
 # * Built-in progress tracking and fault tolerance
 #
+# ::youtube[Simple DeepSeek OCR]{url="https://youtu.be/yJ3b6Gps9qI"}
+#
 # Compare against the examples in /ray/ray_ocr
 #
 # Run with:
