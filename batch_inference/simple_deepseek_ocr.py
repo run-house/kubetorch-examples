@@ -1,4 +1,4 @@
-# Parallel Batch Inference with DeepSeek OCR
+# # Parallel Batch Inference with DeepSeek OCR
 # In this example, we launch a horizontal scaling OCR service (here, not autoscaled, but easily made so)
 # * Downloads from Google blob storage (GCS) directly to memory
 # * Automatic parallelism and load balancing
