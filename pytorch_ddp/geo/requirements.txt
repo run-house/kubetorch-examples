@@ -1,0 +1,5 @@
+torchgeo
+transformers
+torchvision
+pillow
+soxr
