@@ -1,4 +1,4 @@
-# Ray Data with DeepSeek OCR using Ray Serve
+# # Ray Data with DeepSeek OCR using Ray Serve
 # In this example, we use:
 # * Ray Serve for async continuous batching with vLLM's AsyncLLMEngine
 # * Ray Data for streaming downloads from Google blob storage (GCS) into Ray object store
