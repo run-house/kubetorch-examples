@@ -48,9 +48,7 @@ class DeepSeekDistillLlama70BvLLM:
         )
         print("model loaded")
 
-    def generate(
-        self, queries, temperature=0.65, top_p=0.95, max_tokens=5120, min_tokens=32
-    ):
+    def generate(self, queries, temperature=0.65, top_p=0.95, max_tokens=5120, min_tokens=32):
         if self.model is None:
             self.load_model()
 

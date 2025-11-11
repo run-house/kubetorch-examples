@@ -115,8 +115,7 @@ if __name__ == "__main__":
 
     async def process_files():
         tasks = [
-            embedder.embed_dataset("wikimedia/wikipedia", "text", "train", data_file)
-            for data_file in data_files_list
+            embedder.embed_dataset("wikimedia/wikipedia", "text", "train", data_file) for data_file in data_files_list
         ]
         return await asyncio.gather(*tasks)
 
