@@ -48,9 +48,7 @@ import kubetorch as kt
 # the PyTorch docker image and additionally install the `sentence_transformers` package on top of it.
 #
 
-embedder_img = kt.Image(image_id="nvcr.io/nvidia/pytorch:25.05-py3").pip_install(
-    ["sentence_transformers"]
-)
+embedder_img = kt.Image(image_id="nvcr.io/nvidia/pytorch:25.05-py3").pip_install(["sentence_transformers"])
 
 
 @kt.compute(gpus="1", image=embedder_img)
@@ -60,9 +58,7 @@ class Embedder:
         import torch
         from sentence_transformers import SentenceTransformer
 
-        model = SentenceTransformer(
-            model_name_or_path=model_name_or_path, device="cuda", **model_kwargs
-        )
+        model = SentenceTransformer(model_name_or_path=model_name_or_path, device="cuda", **model_kwargs)
         self.model = torch.compile(model)
 
     def embed(self, text: Union[List, str], **embed_kwargs):
@@ -149,9 +145,7 @@ def get_lance_db():
 
     if lance_client is None:
         lance_client = lancedb.connect("/tmp/db")
-        lance_db = lance_client.create_table(
-            "rag-table", schema=Item.to_arrow_schema(), exist_ok=True
-        )
+        lance_db = lance_client.create_table("rag-table", schema=Item.to_arrow_schema(), exist_ok=True)
 
     return lance_db
 
@@ -222,15 +216,11 @@ async def add_document(paths: List[str] = Body([]), kwargs: Dict = Body({})):
 
         # Load and split documents
         docs = WebBaseLoader(web_paths=paths).load()
-        split_docs = RecursiveCharacterTextSplitter(
-            chunk_size=250, chunk_overlap=50
-        ).split_documents(docs)
+        split_docs = RecursiveCharacterTextSplitter(chunk_size=250, chunk_overlap=50).split_documents(docs)
         splits_as_str = [doc.page_content for doc in split_docs]
 
         # Generate embeddings using the remote Embedder service
-        embeddings = Embedder.embed(
-            splits_as_str, normalize_embeddings=True, stream_logs=False, **kwargs
-        )
+        embeddings = Embedder.embed(splits_as_str, normalize_embeddings=True, stream_logs=False, **kwargs)
 
         # Create items for LanceDB
         items = [
@@ -264,9 +254,7 @@ async def generate_response(text: str, limit: int = 4):
 
     try:
         # Encode the input text into a vector using the remote Embedder service
-        vector = Embedder.embed(
-            text=[text], normalize_embeddings=True, stream_logs=False
-        )[0]
+        vector = Embedder.embed(text=[text], normalize_embeddings=True, stream_logs=False)[0]
 
         # Search LanceDB for nearest neighbors to the vector embed
         db = get_lance_db()
@@ -291,9 +279,7 @@ async def generate_response(text: str, limit: int = 4):
         return {"question": text, "response": response, "sources": sources}
 
     except Exception as e:
-        raise HTTPException(
-            status_code=500, detail=f"Failed to generate response: {str(e)}"
-        )
+        raise HTTPException(status_code=500, detail=f"Failed to generate response: {str(e)}")
 
 
 if __name__ == "__main__":

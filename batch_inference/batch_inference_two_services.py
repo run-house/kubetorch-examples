@@ -41,9 +41,7 @@ def prepare_dataset(num_obs=50):
 
 
 # Deploy the Inference as a service
-img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
-    ["torch_geometric"]
-)
+img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(["torch_geometric"])
 
 
 @kt.compute(cpus="1", image=img, name="GNN_Inference")
@@ -72,13 +70,7 @@ class GNNInference:
         data = self.preprocess_data(data)
         print(time.time(), "inference")
         with torch.no_grad():
-            results = (
-                self.model(data.x, data.edge_index, data.edge_attr, data.batch)
-                .detach()
-                .cpu()
-                .numpy()
-                .tolist()
-            )
+            results = self.model(data.x, data.edge_index, data.edge_attr, data.batch).detach().cpu().numpy().tolist()
             print(time.time(), "done inference")
             return results
 
@@ -99,9 +91,7 @@ def run_shard(batch_size=4, num_batches=10000):
     inference_thread = partial(GNNInference.predict, stream_logs=False)
 
     # Run concurrent embedding requests to measure throughput
-    batches_list = [
-        graphs[i : i + batch_size] for i in range(0, len(graphs), batch_size)
-    ]
+    batches_list = [graphs[i : i + batch_size] for i in range(0, len(graphs), batch_size)]
     with ThreadPoolExecutor(max_workers=4) as executor:
         start = time.time()
         results = list(
@@ -111,9 +101,7 @@ def run_shard(batch_size=4, num_batches=10000):
                 desc="Processing inference",
             )
         )
-    print(
-        f"Processed {(len(batches_list) * len(batches_list[0])) / (time.time() - start):.2f} inferences / second"
-    )
+    print(f"Processed {(len(batches_list) * len(batches_list[0])) / (time.time() - start):.2f} inferences / second")
 
     # for i in range(0, len(graphs), batch_size):
     #     batch_graphs = graphs[i:i+batch_size]

@@ -32,9 +32,7 @@ class YOLOTrainer:
         # Load VHR-10 dataset from TorchGeo
         # VHR-10 has 'positive' (with objects) and 'negative' (without objects) splits
         # We use the positive split and manually split it into train/val
-        positive_dataset = VHR10(
-            root=str(self.data_dir / "raw"), split="positive", download=True
-        )
+        positive_dataset = VHR10(root=str(self.data_dir / "raw"), split="positive", download=True)
 
         # VHR-10 class names (10 classes)
         class_names = [
@@ -122,9 +120,7 @@ class YOLOTrainer:
                     height = (y2 - y1) / img_h
 
                     # YOLO format: class_id x_center y_center width height (normalized)
-                    f.write(
-                        f"{int(label)} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n"
-                    )
+                    f.write(f"{int(label)} {x_center:.6f} {y_center:.6f} {width:.6f} {height:.6f}\n")
 
     def train_model(self, model_size="n", epochs=100, imgsz=640, batch_size=-1):
         """Train YOLOv8 model on VHR-10 dataset
@@ -161,17 +157,11 @@ class YOLOTrainer:
         # Run validation to get metrics in memory
         # Ultralytics YOLO saves metrics to disk, but we can get them via model.val()
         metrics_result = self.model.val()
-        metrics = (
-            metrics_result.results_dict
-            if hasattr(metrics_result, "results_dict")
-            else {}
-        )
+        metrics = metrics_result.results_dict if hasattr(metrics_result, "results_dict") else {}
 
         if metrics:
             # Extract common metrics (keys may vary by YOLO version)
-            get_m = lambda k: metrics.get(
-                f"metrics/{k}(B)", metrics.get(f"metrics/{k}", 0)
-            )
+            get_m = lambda k: metrics.get(f"metrics/{k}(B)", metrics.get(f"metrics/{k}", 0))
             m50, m50_95, prec, rec = (
                 get_m("mAP50"),
                 get_m("mAP50-95"),
@@ -179,9 +169,7 @@ class YOLOTrainer:
                 get_m("recall"),
             )
             if m50 or m50_95:
-                print(
-                    f"  mAP50: {m50:.4f}, mAP50-95: {m50_95:.4f}, Precision: {prec:.4f}, Recall: {rec:.4f}"
-                )
+                print(f"  mAP50: {m50:.4f}, mAP50-95: {m50_95:.4f}, Precision: {prec:.4f}, Recall: {rec:.4f}")
             else:
                 print("  (Metrics saved to runs/detect/vhr10_training/results.json)")
         else:
@@ -194,9 +182,7 @@ class YOLOTrainer:
         if self.model is None:
             raise ValueError("Model not trained. Call train_model() first.")
 
-        val_images = list((self.data_dir / "val" / "images").glob("*.jpg"))[
-            :num_samples
-        ]
+        val_images = list((self.data_dir / "val" / "images").glob("*.jpg"))[:num_samples]
         if not val_images:
             raise ValueError("No validation images found.")
 
@@ -211,21 +197,12 @@ class YOLOTrainer:
                 total += len(dets)
                 for cls_name, _ in dets:
                     class_counts[cls_name] = class_counts.get(cls_name, 0) + 1
-                print(
-                    f"{img_path.name}: {', '.join([f'{c}({conf:.2f})' for c, conf in dets]) if dets else 'none'}"
-                )
+                print(f"{img_path.name}: {', '.join([f'{c}({conf:.2f})' for c, conf in dets]) if dets else 'none'}")
 
         avg = total / len(val_images) if val_images else 0
         print(
             f"\n{total} total ({avg:.1f} avg) - "
-            + ", ".join(
-                [
-                    f"{n}: {c}"
-                    for n, c in sorted(
-                        class_counts.items(), key=lambda x: x[1], reverse=True
-                    )
-                ]
-            )
+            + ", ".join([f"{n}: {c}" for n, c in sorted(class_counts.items(), key=lambda x: x[1], reverse=True)])
         )
 
         return {
@@ -272,12 +249,8 @@ if __name__ == "__main__":
                 "torchgeo",
             ]
         )
-        .run_bash(
-            "pip uninstall opencv-python opencv opencv-python-headless -y"
-        )  # Remove existing
-        .run_bash(
-            "pip install opencv-python-headless==4.5.5.64 --break-system-packages"
-        )  # Pin this version
+        .run_bash("pip uninstall opencv-python opencv opencv-python-headless -y")  # Remove existing
+        .run_bash("pip install opencv-python-headless==4.5.5.64 --break-system-packages")  # Pin this version
         .run_bash('pip install "numpy<2.0"')  # Set numpy to be compatible with yolo
     )
 

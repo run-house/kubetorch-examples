@@ -27,23 +27,17 @@ from verl.trainer.main_ppo import run_ppo
 # the baseline verl config), and we show downloading the data before executing the training.
 def run_grpo(cfg):
     GlobalHydra.instance().clear()
-    with initialize_config_module(
-        config_module="verl.trainer.config", version_base="1.1"
-    ):
+    with initialize_config_module(config_module="verl.trainer.config", version_base="1.1"):
         base_config = compose(config_name="ppo_trainer")
         with open_dict(base_config):
-            cfg = OmegaConf.merge(
-                base_config, cfg
-            )  # Add our local configs propagating to remote
+            cfg = OmegaConf.merge(base_config, cfg)  # Add our local configs propagating to remote
 
         download_data_math(
             data_source=cfg.data.hf_data_name,
             train_path=cfg.data.train_files,
             val_path=cfg.data.val_files,
         )
-        download_model(
-            cfg.actor_rollout_ref.model.hf_model_name, cfg.actor_rollout_ref.model.path
-        )
+        download_model(cfg.actor_rollout_ref.model.hf_model_name, cfg.actor_rollout_ref.model.path)
 
         ray.init(address="auto")
         run_ppo(cfg)
@@ -55,9 +49,7 @@ def run_grpo(cfg):
 # cluster with num nodes and GPUs per node as per our config.
 def main(cfg):
     img = (
-        kt.Image(
-            image_id="verlai/verl:app-verl0.5-transformers4.55.4-vllm0.10.0-mcore0.13.0-te2.2"
-        )
+        kt.Image(image_id="verlai/verl:app-verl0.5-transformers4.55.4-vllm0.10.0-mcore0.13.0-te2.2")
         .pip_install(["datasets", "omegaconf", "verl"])
         .set_env_vars({"WANDB_API_KEY": os.environ["WANDB_API_KEY"]})
     )

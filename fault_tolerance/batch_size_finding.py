@@ -74,9 +74,7 @@ if __name__ == "__main__":
             batch_size *= 2
         except Exception as e:
             if "CUDA out of memory" in str(e):
-                print(
-                    f"OOM with batch size {2*batch_size}, setting batch size to {batch_size}"
-                )
+                print(f"OOM with batch size {2*batch_size}, setting batch size to {batch_size}")
                 break
             else:
                 raise e

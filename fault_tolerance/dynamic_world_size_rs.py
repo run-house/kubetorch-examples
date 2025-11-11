@@ -12,12 +12,8 @@ from pathlib import Path
 from typing import Dict
 
 # Suppress specific warnings
-warnings.filterwarnings(
-    "ignore", message="TypedStorage is deprecated", category=UserWarning
-)
-warnings.filterwarnings(
-    "ignore", message="`resume_download` is deprecated", category=FutureWarning
-)
+warnings.filterwarnings("ignore", message="TypedStorage is deprecated", category=UserWarning)
+warnings.filterwarnings("ignore", message="`resume_download` is deprecated", category=FutureWarning)
 
 import kubetorch as kt
 import torch
@@ -62,9 +58,7 @@ class BERTTrainer:
 
         # Load model, tokenizer, and dataset (heavy operations which should block "ready" state)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_name, num_labels=self.num_labels
-        )
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name, num_labels=self.num_labels)
         self.dataset = self._load_dataset()
         self.distributed_shuffled_dataset = None
         # Use tensors for epoch and loss so they're backed by server memory
@@ -81,9 +75,7 @@ class BERTTrainer:
             print("Connecting to process group...")
             torch.distributed.init_process_group(backend="nccl")
         else:
-            print(
-                "Process group already initialized, completing setup for this instance."
-            )
+            print("Process group already initialized, completing setup for this instance.")
 
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
@@ -100,11 +92,7 @@ class BERTTrainer:
 
         # Persist model state to object store for fault tolerance
         # The returned dict contains tensors backed by the server's memory
-        model_state = (
-            self.model.module.state_dict()
-            if hasattr(self.model, "module")
-            else self.model.state_dict()
-        )
+        model_state = self.model.module.state_dict() if hasattr(self.model, "module") else self.model.state_dict()
 
         # Store everything as tensors - epoch and loss will auto-update in server memory
         checkpoint_to_store = {
@@ -128,9 +116,7 @@ class BERTTrainer:
         self.loss_tensor = persisted_checkpoint["loss"]
 
         print(f"Rank {self.rank}: Model state persisted to object store")
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=self.learning_rate
-        )
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.learning_rate)
 
         # ## Collate Function for On-the-Fly Tokenization
         # Tokenize batches as they're loaded to avoid upfront processing delays
@@ -171,9 +157,7 @@ class BERTTrainer:
 
             def __iter__(self):
                 # Shuffle with epoch-based seed for consistent shuffling across ranks
-                dataset_iter = iter(
-                    self.dataset.shuffle(seed=self.epoch, buffer_size=1000)
-                )
+                dataset_iter = iter(self.dataset.shuffle(seed=self.epoch, buffer_size=1000))
                 # Each rank processes every world_size-th example
                 for i, example in enumerate(dataset_iter):
                     if i % self.world_size == self.rank:
@@ -212,9 +196,7 @@ class BERTTrainer:
 
             # Read the current epoch value from the tensor
             current_epoch = self.epoch_tensor.item()
-            print(
-                f"Rank {self.rank}: Restored from object store at epoch {current_epoch}"
-            )
+            print(f"Rank {self.rank}: Restored from object store at epoch {current_epoch}")
         else:
             print(f"Rank {self.rank}: No state found in object store")
             # Initialize tensors if not found
@@ -225,9 +207,7 @@ class BERTTrainer:
         # Get max epoch across all ranks to identify who has the latest checkpoint
         # Use the epoch from our tensor
         current_epoch = self.epoch_tensor.item() if hasattr(self, "epoch_tensor") else 0
-        epoch_for_sync = torch.tensor(
-            [current_epoch], dtype=torch.long, device=self.device
-        )
+        epoch_for_sync = torch.tensor([current_epoch], dtype=torch.long, device=self.device)
         torch.distributed.all_reduce(epoch_for_sync, op=torch.distributed.ReduceOp.MAX)
         max_epoch = epoch_for_sync[0].item()
 
@@ -245,22 +225,16 @@ class BERTTrainer:
         if hasattr(self, "epoch_tensor"):
             self.epoch_tensor[0] = max_epoch
         else:
-            self.epoch_tensor = torch.tensor(
-                [max_epoch], dtype=torch.long, device="cuda"
-            )
+            self.epoch_tensor = torch.tensor([max_epoch], dtype=torch.long, device="cuda")
 
         # ## Broadcasting Weights
         # All ranks participate in weight sync to ensure consistency after world size change.
         # This is crucial for maintaining training stability when workers are added/removed
         if max_epoch > 0:
             if self.rank == source_rank:
-                print(
-                    f"Rank {self.rank}: Broadcasting weights to other ranks (epoch {max_epoch})"
-                )
+                print(f"Rank {self.rank}: Broadcasting weights to other ranks (epoch {max_epoch})")
             else:
-                print(
-                    f"Rank {self.rank}: Receiving weights from rank {source_rank} (epoch {max_epoch})"
-                )
+                print(f"Rank {self.rank}: Receiving weights from rank {source_rank} (epoch {max_epoch})")
 
             for param in self.model.parameters():
                 torch.distributed.broadcast(param.data, src=source_rank)
@@ -329,9 +303,7 @@ class BERTTrainer:
             self.epoch_tensor[0] = epoch + 1
             avg_epoch_loss = epoch_loss / max(num_batches, 1)
             self.loss_tensor[0] = avg_epoch_loss
-            print(
-                f"Rank {self.rank}: Epoch {self.epoch_tensor.item()} complete, Avg Loss: {avg_epoch_loss:.4f}"
-            )
+            print(f"Rank {self.rank}: Epoch {self.epoch_tensor.item()} complete, Avg Loss: {avg_epoch_loss:.4f}")
 
         return {
             "rank": self.rank,
@@ -345,12 +317,8 @@ class BERTTrainer:
 # The training adapts to workers being added or removed, redistributing the workload
 # and synchronizing model state across the new set of workers.
 def main():
-    parser = argparse.ArgumentParser(
-        description="PyTorch Distributed Training with Preemption Recovery"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=6, help="number of epochs to train (default: 5)"
-    )
+    parser = argparse.ArgumentParser(description="PyTorch Distributed Training with Preemption Recovery")
+    parser.add_argument("--epochs", type=int, default=6, help="number of epochs to train (default: 5)")
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -374,9 +342,7 @@ def main():
     # Define compute environment with GPU support
     gpus = kt.Compute(
         gpus=1,  # 1 GPU per worker
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
-            ["transformers==4.36.0", "datasets"]
-        ),
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(["transformers==4.36.0", "datasets"]),
         launch_timeout=600,
     ).distribute("pytorch", workers=args.workers, port=12345)
 
@@ -427,9 +393,7 @@ def main():
             f"Epochs Completed = {rank_result['epochs_completed']}"
         )
 
-    print(
-        "\nNote: Training automatically adapted to world size changes and synchronized weights!"
-    )
+    print("\nNote: Training automatically adapted to world size changes and synchronized weights!")
 
 
 if __name__ == "__main__":

@@ -136,12 +136,8 @@ class TRLCodeSandboxTrainer:
         def grpo_reward_function(prompts, completions, **kwargs):
             rewards = []
             for prompt, completion in zip(prompts, completions):
-                task_text = prompt.replace("# Task: ", "").replace(
-                    "\n# Solution:\n", ""
-                )
-                task = next(
-                    task for task in self._current_tasks if task.prompt == task_text
-                )
+                task_text = prompt.replace("# Task: ", "").replace("\n# Solution:\n", "")
+                task = next(task for task in self._current_tasks if task.prompt == task_text)
                 result = self.agent.execute_code(completion)
                 eval = self.agent.execute_code(f"{completion}\n\n{task.test_code}")
                 reward = self.calculate_reward(task, result, eval)
@@ -167,9 +163,7 @@ class TRLCodeSandboxTrainer:
 
         return kt.cls(CodeAgent).to(cpus, get_if_exists=True)
 
-    def calculate_reward(
-        self, task: CodeSandboxTask, result: dict, test_result: dict = None
-    ) -> float:
+    def calculate_reward(self, task: CodeSandboxTask, result: dict, test_result: dict = None) -> float:
         """Calculate reward based on code execution results"""
         # Execute the generated code
         reward = 0.0
@@ -179,20 +173,14 @@ class TRLCodeSandboxTrainer:
             reward += 0.5
 
             # Additional reward for correct output and clean execution
-            if (
-                task.expected_output
-                and task.expected_output.strip() in result["stdout"]
-            ):
+            if task.expected_output and task.expected_output.strip() in result["stdout"]:
                 reward += 0.3
             if not result["stderr"].strip():
                 reward += 0.1
 
             # Evaluate based on test results, if provided
             if test_result:
-                if (
-                    task.expected_output
-                    and task.expected_output.strip() in test_result["stdout"]
-                ):
+                if task.expected_output and task.expected_output.strip() in test_result["stdout"]:
                     reward += 0.4
         else:
             # Penalty for runtime errors
@@ -210,9 +198,7 @@ class TRLCodeSandboxTrainer:
         logger.info(f"Starting training epoch with {num_steps} steps")
 
         # Create a subset of the dataset for this epoch
-        epoch_dataset = self.dataset.shuffle().select(
-            range(min(num_steps, len(self.dataset)))
-        )
+        epoch_dataset = self.dataset.shuffle().select(range(min(num_steps, len(self.dataset))))
         self.grpo_trainer.train_dataset = epoch_dataset
 
         try:
@@ -274,9 +260,7 @@ def main(grpo_cfg, epochs):
     logger.info("Starting TRL GRPO Code Sandbox training...")
 
     # Kubetorch setup for remote execution
-    img = kt.Image(
-        image_id="nvcr.io/nvidia/ai-workbench/python-cuda120:1.0.6"
-    ).pip_install(
+    img = kt.Image(image_id="nvcr.io/nvidia/ai-workbench/python-cuda120:1.0.6").pip_install(
         [
             "'trl>=0.7.0'",
             "'transformers>=4.35.0'",

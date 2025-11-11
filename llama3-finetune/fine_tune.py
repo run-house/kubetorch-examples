@@ -64,9 +64,7 @@ class FineTuner:
         self.base_model.config.pretraining_tp = 1
 
     def load_tokenizer(self):
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.base_model_name, trust_remote_code=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(self.base_model_name, trust_remote_code=True)
         self.tokenizer.pad_token = self.tokenizer.eos_token
         self.tokenizer.padding_side = "right"
 
@@ -83,10 +81,7 @@ class FineTuner:
 
     def load_fine_tuned_model(self):
         if not self.new_model_exists():
-            raise FileNotFoundError(
-                "No fine tuned model found. "
-                "Call the `tune` method to run the fine tuning."
-            )
+            raise FileNotFoundError("No fine tuned model found. " "Call the `tune` method to run the fine tuning.")
 
         self.fine_tuned_model = AutoPeftModelForCausalLM.from_pretrained(
             self.fine_tuned_model_name,
@@ -144,9 +139,7 @@ class FineTuner:
             self.load_base_model()
         print("base model loaded")
 
-        peft_parameters = LoraConfig(
-            lora_alpha=16, lora_dropout=0.1, r=8, bias="none", task_type="CAUSAL_LM"
-        )
+        peft_parameters = LoraConfig(lora_alpha=16, lora_dropout=0.1, r=8, bias="none", task_type="CAUSAL_LM")
 
         train_params = self.training_params()
         trainer = self.sft_trainer(training_data, peft_parameters, train_params)

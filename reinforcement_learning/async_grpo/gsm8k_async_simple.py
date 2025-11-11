@@ -50,9 +50,7 @@ class vLLM:
 
         # Reuse cached engine if available (for hot-swapping)
         if kt_cached_state and kt_cached_state.get("model") is not None:
-            print(
-                f"Reusing AsyncLLMEngine from cache (version {self.checkpoint_version})"
-            )
+            print(f"Reusing AsyncLLMEngine from cache (version {self.checkpoint_version})")
             self.model = kt_cached_state["model"]
             if lora_checkpoint and os.path.exists(lora_checkpoint):
                 self.load_lora_adapter(lora_checkpoint)
@@ -108,9 +106,7 @@ class vLLM:
 
         # Check if this request is from an old checkpoint version
         if request_version is not None and request_version != self.checkpoint_version:
-            print(
-                f"Ignoring stale request from version {request_version} (current: {self.checkpoint_version})"
-            )
+            print(f"Ignoring stale request from version {request_version} (current: {self.checkpoint_version})")
             # Return empty results for stale requests
             return [""] * len(prompts), [[]] * len(prompts)
 
@@ -125,9 +121,7 @@ class vLLM:
                 prompt,
                 sampling_params,
                 request_id,
-                lora_request=self.current_lora_request
-                if self.current_lora_request
-                else None,
+                lora_request=self.current_lora_request if self.current_lora_request else None,
             )
 
             # Collect the final result
@@ -171,14 +165,10 @@ class SimpleMathAgent:
             "End with '#### <answer>' where <answer> is just the number."
         )
 
-    async def generate_batch(
-        self, questions, answers, num_generations=4, step_num=None
-    ):
+    async def generate_batch(self, questions, answers, num_generations=4, step_num=None):
         """Generate multiple completions per question and calculate rewards."""
         if step_num:
-            print(
-                f"[INFERENCE] Starting generation for step {step_num} (checkpoint v{self.checkpoint_version})"
-            )
+            print(f"[INFERENCE] Starting generation for step {step_num} (checkpoint v{self.checkpoint_version})")
 
         # Expand for multiple generations
         expanded_questions = []
@@ -188,10 +178,7 @@ class SimpleMathAgent:
             expanded_answers.extend([a] * num_generations)
 
         # Format prompts
-        prompts = [
-            f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:"
-            for q in expanded_questions
-        ]
+        prompts = [f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:" for q in expanded_questions]
 
         # Generate completions with version tracking
         completions, token_ids = await self.inference_service.generate(
@@ -207,9 +194,7 @@ class SimpleMathAgent:
 
         # Check if request was ignored due to being stale
         if all(c == "" for c in completions):
-            print(
-                f"Request was stale (version {self.checkpoint_version}), skipping batch"
-            )
+            print(f"Request was stale (version {self.checkpoint_version}), skipping batch")
             return None, None, None, None
 
         # Calculate rewards
@@ -221,9 +206,7 @@ class SimpleMathAgent:
 
             # Extract true answer
             true_match = re.search(r"####\s*([-+]?\d*\.?\d+)", true_answer)
-            true_value = (
-                true_match.group(1).strip() if true_match else true_answer.strip()
-            )
+            true_value = true_match.group(1).strip() if true_match else true_answer.strip()
 
             # Simple reward: 1.0 for correct, -0.2 for wrong
             reward = 1.0 if pred_answer == true_value else -0.2
@@ -297,9 +280,7 @@ class GRPOTrainer:
         self.model.gradient_checkpointing_enable()
 
         # Setup tokenizer
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_id, trust_remote_code=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
 
@@ -311,9 +292,7 @@ class GRPOTrainer:
 
         from torch.nn.parallel import DistributedDataParallel as DDP
 
-        self.model = DDP(
-            self.model, device_ids=[self.device], find_unused_parameters=False
-        )
+        self.model = DDP(self.model, device_ids=[self.device], find_unused_parameters=False)
 
         # Optimizer for LoRA params only (much fewer parameters)
         trainable_params = [p for p in self.model.parameters() if p.requires_grad]
@@ -329,9 +308,7 @@ class GRPOTrainer:
         self.optimizer.zero_grad()
 
         # Tokenize prompts
-        prompt_encoding = self.tokenizer(
-            prompts, padding=True, truncation=True, max_length=1024, return_tensors="pt"
-        )
+        prompt_encoding = self.tokenizer(prompts, padding=True, truncation=True, max_length=1024, return_tensors="pt")
         prompt_ids = prompt_encoding.input_ids.to(self.device)
 
         # Pad completions
@@ -346,12 +323,8 @@ class GRPOTrainer:
             padded_completion_ids.append(padded)
             completion_masks.append(mask)
 
-        completion_ids = torch.tensor(padded_completion_ids, dtype=torch.long).to(
-            self.device
-        )
-        completion_mask = torch.tensor(completion_masks, dtype=torch.float).to(
-            self.device
-        )
+        completion_ids = torch.tensor(padded_completion_ids, dtype=torch.long).to(self.device)
+        completion_mask = torch.tensor(completion_masks, dtype=torch.float).to(self.device)
 
         # Calculate advantages
         rewards_tensor = torch.tensor(rewards).view(-1, num_generations)
@@ -370,14 +343,10 @@ class GRPOTrainer:
         flat_logits = logits.reshape(-1, vocab_size)
         flat_targets = completion_ids.reshape(-1)
 
-        token_losses = F.cross_entropy(
-            flat_logits, flat_targets, reduction="none"
-        ).reshape(completion_ids.shape)
+        token_losses = F.cross_entropy(flat_logits, flat_targets, reduction="none").reshape(completion_ids.shape)
 
         # Weight by advantages (DrGRPO)
-        weighted_loss = (
-            token_losses * advantages.unsqueeze(-1) * completion_mask
-        ).sum() / completion_mask.sum()
+        weighted_loss = (token_losses * advantages.unsqueeze(-1) * completion_mask).sum() / completion_mask.sum()
 
         # Backward and update
         weighted_loss.backward()
@@ -396,9 +365,7 @@ class GRPOTrainer:
         """Save LoRA checkpoint."""
         self.checkpoint_version = getattr(self, "checkpoint_version", 0) + 1
         checkpoint_path = Path(f"checkpoint-v{self.checkpoint_version}-{self.steps}")
-        model_to_save = (
-            self.model.module if hasattr(self.model, "module") else self.model
-        )
+        model_to_save = self.model.module if hasattr(self.model, "module") else self.model
         model_to_save.save_pretrained(checkpoint_path)
         print(f"Checkpoint v{self.checkpoint_version} saved to {checkpoint_path}")
         return str(checkpoint_path), self.checkpoint_version
@@ -462,9 +429,7 @@ async def simple_async_grpo(
             # Start inference task
             current_step = steps_completed + 1
             inference_task = asyncio.create_task(
-                agent.generate_batch(
-                    questions, answers, num_generations, step_num=current_step
-                )
+                agent.generate_batch(questions, answers, num_generations, step_num=current_step)
             )
             inference_tasks.append(inference_task)
             print(f"[SCHEDULER] Launched inference for step {current_step}")
@@ -479,18 +444,14 @@ async def simple_async_grpo(
 
                 # Check if result was stale and skipped
                 if result[0] is None:
-                    print(
-                        f"[TRAINING] Skipping training for stale request at step {step_num}"
-                    )
+                    print(f"[TRAINING] Skipping training for stale request at step {step_num}")
                     return step_num
 
                 prompts, completions, token_ids, rewards = result
 
                 print(f"[TRAINING] Starting training for step {step_num}")
                 # Train on this batch
-                metrics = await train_service.train_batch(
-                    prompts, completions, token_ids, rewards, num_generations
-                )
+                metrics = await train_service.train_batch(prompts, completions, token_ids, rewards, num_generations)
 
                 print(
                     f"[TRAINING] Completed step {step_num}: loss={metrics[0]['loss']:.4f}, "
@@ -500,14 +461,10 @@ async def simple_async_grpo(
                 # Save checkpoint periodically
                 if step_num % checkpoint_interval == 0:
                     print(f"[CHECKPOINT] Saving checkpoint at step {step_num}")
-                    checkpoint_result = (
-                        await train_service.save_checkpoint(workers=[0])
-                    )[0]
+                    checkpoint_result = (await train_service.save_checkpoint(workers=[0]))[0]
                     checkpoint_path, new_version = checkpoint_result
 
-                    print(
-                        f"[CHECKPOINT] Hot-swapping inference service to v{new_version}"
-                    )
+                    print(f"[CHECKPOINT] Hot-swapping inference service to v{new_version}")
                     # Use training service to redeploy inference with new checkpoint
                     new_service = (
                         await train_service.redeploy_inference(
@@ -525,9 +482,7 @@ async def simple_async_grpo(
                     agent.inference_service.async_ = True
                     agent.checkpoint_version = new_version  # Update agent's version
                     inference_service = new_service  # Update outer scope reference
-                    print(
-                        f"[CHECKPOINT] Successfully hot-swapped to v{new_version}: {checkpoint_path}"
-                    )
+                    print(f"[CHECKPOINT] Successfully hot-swapped to v{new_version}: {checkpoint_path}")
 
                 return step_num
 
@@ -539,18 +494,14 @@ async def simple_async_grpo(
                     f"[SCHEDULER] {len(training_tasks)} training tasks in queue, {len(inference_tasks)} inference tasks running"
                 )
                 # Wait for any task to complete and clean up finished ones
-                done, pending = await asyncio.wait(
-                    training_tasks, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, pending = await asyncio.wait(training_tasks, return_when=asyncio.FIRST_COMPLETED)
                 # Remove completed tasks from our list
                 for task in done:
                     training_tasks.remove(task)
                     await task  # Ensure any exceptions are raised
 
             # Create training task that waits for inference
-            training_task = asyncio.create_task(
-                train_when_ready(inference_task, steps_completed + 1)
-            )
+            training_task = asyncio.create_task(train_when_ready(inference_task, steps_completed + 1))
             training_tasks.append(training_task)
             steps_completed += 1
 
@@ -604,9 +555,7 @@ async def main():
 
     # Deploy services in parallel - Kubetorch handles the orchestration
     print("Deploying services...")
-    inference_service, train_service = await asyncio.gather(
-        inference_service_task, train_service_task
-    )
+    inference_service, train_service = await asyncio.gather(inference_service_task, train_service_task)
 
     # Enable async mode for non-blocking calls
     inference_service.async_ = True

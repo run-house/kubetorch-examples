@@ -65,9 +65,7 @@ class DLRM(nn.Module):
 
         s3 = boto3.client("s3")
         response = s3.get_object(Bucket=s3_bucket, Key=s3_key)
-        model_state_dict = torch.load(
-            BytesIO(response["Body"].read())
-        )  # Load the state_dict from S3
+        model_state_dict = torch.load(BytesIO(response["Body"].read()))  # Load the state_dict from S3
         self.load_state_dict(model_state_dict)
 
 
@@ -83,9 +81,7 @@ def read_preprocessed_dlrm(data_path):
             ("rating", pa.float32()),
         ]
     )
-    return ray.data.read_parquet(
-        data_path, schema=schema, columns=["userId", "movieId", "rating"]
-    )
+    return ray.data.read_parquet(data_path, schema=schema, columns=["userId", "movieId", "rating"])
 
 
 # ## Trainer Function
@@ -143,9 +139,7 @@ def dlrm_train(config):
         running_loss = 0.0
         train_data_shard = ray.train.get_dataset_shard("train")
 
-        for batch_idx, batch in enumerate(
-            train_data_shard.iter_torch_batches(batch_size=batch_size)
-        ):
+        for batch_idx, batch in enumerate(train_data_shard.iter_torch_batches(batch_size=batch_size)):
             optimizer.zero_grad()
 
             user_ids, item_ids, labels = (
@@ -173,9 +167,7 @@ def dlrm_train(config):
         eval_data_shard = ray.train.get_dataset_shard("val")
 
         with torch.no_grad():
-            for batch_idx, batch in enumerate(
-                eval_data_shard.iter_torch_batches(batch_size=batch_size)
-            ):
+            for batch_idx, batch in enumerate(eval_data_shard.iter_torch_batches(batch_size=batch_size)):
                 user_ids, item_ids, labels = (
                     batch["userId"],
                     batch["movieId"],
@@ -280,13 +272,9 @@ if __name__ == "__main__":
     working_s3_bucket = "rh-demo-external"
     working_s3_path = "dlrm-training-example/"
 
-    train_data_path = (
-        f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_data/train/"
-    )
+    train_data_path = f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_data/train/"
 
-    val_data_path = (
-        f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_data/eval/"
-    )
+    val_data_path = f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_data/eval/"
 
     # Define compute with GPUs and create a Ray cluster with multiple nodes which will run our function
     gpus_per_node = 1
@@ -296,9 +284,9 @@ if __name__ == "__main__":
         ["torch", "'ray[train]'", "datasets", "boto3", "awscli"]
     )
 
-    gpus = kt.Compute(
-        gpus=gpus_per_node, image=img, secrets=[kt.secret(provider="aws")]
-    ).distribute("ray", workers=num_nodes)
+    gpus = kt.Compute(gpus=gpus_per_node, image=img, secrets=[kt.secret(provider="aws")]).distribute(
+        "ray", workers=num_nodes
+    )
 
     remote_trainer = kt.fn(ray_trainer).to(gpus)
 

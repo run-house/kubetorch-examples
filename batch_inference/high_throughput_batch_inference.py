@@ -35,17 +35,11 @@ class SampleGNN(nn.Module):
 # You can run `kt deploy batch_inference_example.py` and it will stand up the service on Kubernetes as a properly autoscaling service.
 ##########
 
-img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
-    ["torch_geometric", "tqdm"]
-)
+img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(["torch_geometric", "tqdm"])
 
 # @kt.compute(cpus="12", image=img, name="GNN_Inference", concurrency = 1) # If you want to use CPU, not GPU
-@kt.compute(
-    gpus="1", cpus=8, memory="15Gi", image=img, name="GNN_Inference", concurrency=1
-)
-@kt.autoscale(
-    initial_scale=1, min_scale=0, max_scale=5, target=1, target_utilization=100
-)
+@kt.compute(gpus="1", cpus=8, memory="15Gi", image=img, name="GNN_Inference", concurrency=1)
+@kt.autoscale(initial_scale=1, min_scale=0, max_scale=5, target=1, target_utilization=100)
 class GNNInference:
     def __init__(self, compile_mode="default"):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -57,9 +51,7 @@ class GNNInference:
     # Load your trained model here from disk/bucket
     def load_model(self, compile_mode):
         model = SampleGNN()
-        return torch.compile(
-            model.to(self.device).eval(), mode=compile_mode
-        )  # compile for efficiency
+        return torch.compile(model.to(self.device).eval(), mode=compile_mode)  # compile for efficiency
 
     # Load each shard of your dataset from disk/bucket
     def load_dataset(self, gcs_path):
@@ -102,13 +94,7 @@ class GNNInference:
         for data in tqdm(self.loader):
             data = data.to(self.device)
             with torch.no_grad(), torch.cuda.amp.autocast():
-                pred = (
-                    self.model(data.x, data.edge_index, data.edge_attr, data.batch)
-                    .detach()
-                    .cpu()
-                    .numpy()
-                    .tolist()
-                )
+                pred = self.model(data.x, data.edge_index, data.edge_attr, data.batch).detach().cpu().numpy().tolist()
             results.extend(pred)
 
         self.write_inference_results("fake_path/", results)
@@ -127,9 +113,7 @@ class GNNInference:
     ):
         try:
             print("Loading Data")
-            self.load_dummy_dataset(
-                num_obs, batch_size, num_data_workers, pin_memory, persistent_workers
-            )
+            self.load_dummy_dataset(num_obs, batch_size, num_data_workers, pin_memory, persistent_workers)
             print("Starting Inference")
             self.predict()
             return {"file": filename, "status": "success"}
@@ -146,9 +130,7 @@ class GNNInference:
         pin_memory=True,
         persistent_workers=False,
     ):
-        self.load_dummy_dataset(
-            num_obs, batch_size, num_data_workers, pin_memory, persistent_workers
-        )
+        self.load_dummy_dataset(num_obs, batch_size, num_data_workers, pin_memory, persistent_workers)
 
         # Warmup
         print("warming up")
@@ -166,30 +148,20 @@ class GNNInference:
         for data in tqdm(self.loader):
             data = data.to(self.device)
             with torch.no_grad(), torch.cuda.amp.autocast():
-                pred = (
-                    self.model(data.x, data.edge_index, data.edge_attr, data.batch)
-                    .detach()
-                    .cpu()
-                    .numpy()
-                    .tolist()
-                )
+                pred = self.model(data.x, data.edge_index, data.edge_attr, data.batch).detach().cpu().numpy().tolist()
             results.extend(pred)
 
         print(f"Ran {len(results) / (time.time() - start):.2f} inferences / second")
 
 
 def inference_thread(filename):
-    return GNNInference.load_data_and_predict(
-        filename=filename, num_obs=500000, batch_size=2048, num_data_workers=6
-    )
+    return GNNInference.load_data_and_predict(filename=filename, num_obs=500000, batch_size=2048, num_data_workers=6)
 
 
 if __name__ == "__main__":
     # See how many tokens we can generate on the service
 
-    GNNInference.benchmark(
-        num_obs=100000, batch_size=1024, num_data_workers=6, persistent_workers=True
-    )
+    GNNInference.benchmark(num_obs=100000, batch_size=1024, num_data_workers=6, persistent_workers=True)
 
     # How we would run in parallel by calling the remote service in parallel via threads
     files_list = [f"file{i}" for i in range(1, 100)]  # Your inference inputs
