@@ -1,11 +1,13 @@
 """YOLOv8 training on XView from GCS"""
-
+# fmt: off
 import os
-import yaml
 from pathlib import Path
+
 import kubetorch as kt
+import yaml
 
 # XView type_id to class_id (11-94 -> 0-59)
+# ruff: noqa
 XVIEW_TYPE_TO_CLASS = {
     11: 0, 12: 1, 13: 2, 15: 3, 17: 4, 18: 5, 19: 6, 20: 7, 21: 8,
     23: 9, 24: 10, 25: 11, 26: 12, 27: 13, 28: 14, 29: 15, 32: 16,
@@ -16,7 +18,6 @@ XVIEW_TYPE_TO_CLASS = {
     74: 49, 76: 50, 77: 51, 79: 52, 83: 53, 84: 54, 86: 55, 89: 56,
     91: 57, 93: 58, 94: 59
 }
-
 
 class XViewYOLOTrainer:
     """YOLOv8 trainer for XView from GCS."""
@@ -37,11 +38,13 @@ class XViewYOLOTrainer:
                 del sys.modules[mod]
 
         import importlib
+
         import google.cloud.storage
         importlib.reload(google.cloud.storage)
 
-        from google.cloud import storage
         from concurrent.futures import ThreadPoolExecutor
+
+        from google.cloud import storage
         from tqdm import tqdm
 
         if (self.data_dir / "train").exists():
@@ -96,8 +99,8 @@ class XViewYOLOTrainer:
 
     def _split_train_val(self, val_split=0.1):
         """Split into train/val (10% validation)."""
-        import shutil
         import random
+        import shutil
 
         val_dir = self.data_dir / "val"
         if (val_dir / "images").exists():
@@ -155,8 +158,8 @@ class XViewYOLOTrainer:
 
     def train_model(self, model_size="n", epochs=100, imgsz=768, batch_size=16):
         """Train YOLOv8 (n/s/m/l/x)."""
-        from ultralytics import YOLO
         import torch
+        from ultralytics import YOLO
 
         if self.dataset_yaml is None:
             raise ValueError("Call create_dataset_yaml() first")

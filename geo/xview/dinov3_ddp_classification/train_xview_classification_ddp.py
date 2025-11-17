@@ -1,18 +1,18 @@
 """Multi-label classification on XView with DINOv3 + PyTorch DDP"""
-
+# fmt: off
 import os
 from pathlib import Path
 from typing import List, Tuple
 
-import torch
-import torch.nn as nn
-import torch.distributed as dist
-from torch.utils.data import Dataset, DataLoader, DistributedSampler
-from torch.nn.parallel import DistributedDataParallel as DDP
-from PIL import Image
-from tqdm import tqdm
-
 import kubetorch as kt
+
+import torch
+import torch.distributed as dist
+import torch.nn as nn
+from PIL import Image
+from torch.nn.parallel import DistributedDataParallel as DDP
+from torch.utils.data import DataLoader, Dataset, DistributedSampler
+from tqdm import tqdm
 
 DINOV3_MODELS = {
     "vitl16": {
@@ -36,7 +36,6 @@ XVIEW_TYPE_TO_CLASS = {
     74: 49, 76: 50, 77: 51, 79: 52, 83: 53, 84: 54, 86: 55, 89: 56,
     91: 57, 93: 58, 94: 59
 }
-
 
 class XViewClassificationDataset(Dataset):
     """Streams XView tiled images from GCS for multi-label classification."""
@@ -163,7 +162,7 @@ class DINOv3ViT(nn.Module):
         self.model, self.processor = self._load_model(pretrained)
 
     def _load_model(self, pretrained):
-        from transformers import AutoImageProcessor, AutoModel, AutoConfig
+        from transformers import AutoConfig, AutoImageProcessor, AutoModel
         model_id = self.model_info["model_id"]
         os.environ["HF_ALLOW_CODE_EVAL"] = "1"
 
