@@ -1,7 +1,8 @@
-import requests
-from tqdm import tqdm
 import os
+
+import requests
 from google.cloud import storage
+from tqdm import tqdm
 
 
 def download_file(url, output_path):
@@ -23,8 +24,9 @@ def download_file(url, output_path):
 
 
 def gcs_upload(local_path, gcs_bucket, gcs_prefix, creds_path):
-    from concurrent.futures import ThreadPoolExecutor, as_completed
-    print('HIT')
+    from concurrent.futures import as_completed, ThreadPoolExecutor
+
+    print("HIT")
     os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = creds_path
     client = storage.Client()
     bucket = client.bucket(gcs_bucket)
@@ -37,10 +39,13 @@ def gcs_upload(local_path, gcs_bucket, gcs_prefix, creds_path):
     local_path = Path(local_path)
     files_to_upload = [
         (fp, f"{gcs_prefix}/{fp.relative_to(local_path)}")
-        for fp in local_path.rglob('*') if fp.is_file()
+        for fp in local_path.rglob("*")
+        if fp.is_file()
     ]
 
-    print(f"Uploading {len(files_to_upload)} files to gs://{gcs_bucket}/{gcs_prefix}/...")
+    print(
+        f"Uploading {len(files_to_upload)} files to gs://{gcs_bucket}/{gcs_prefix}/..."
+    )
     with ThreadPoolExecutor(max_workers=24) as executor:
         futures = [executor.submit(upload_file, f) for f in files_to_upload]
         for i, future in enumerate(as_completed(futures), 1):

@@ -1,6 +1,7 @@
 import json
+from concurrent.futures import as_completed, ProcessPoolExecutor
 from pathlib import Path
-from concurrent.futures import ProcessPoolExecutor, as_completed
+
 from PIL import Image
 from tqdm import tqdm
 
@@ -112,12 +113,14 @@ def process_image(args):
             y_center = ((y1 + y2) / 2) / tile_h
             w = (x2 - x1) / tile_w
             h = (y2 - y1) / tile_h
-            yolo_boxes.append(f"{int(class_id)} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}")
+            yolo_boxes.append(
+                f"{int(class_id)} {x_center:.6f} {y_center:.6f} {w:.6f} {h:.6f}"
+            )
 
         # Save labels
         label_path = output_dir / "labels" / f"{image_name}_tile_{idx:04d}.txt"
-        with open(label_path, 'w') as f:
-            f.write('\n'.join(yolo_boxes))
+        with open(label_path, "w") as f:
+            f.write("\n".join(yolo_boxes))
 
         saved_tiles.append(tile_name)
 
@@ -125,12 +128,7 @@ def process_image(args):
 
 
 def tile_xview_dataset(
-    images_dir,
-    geojson_file,
-    output_dir,
-    tile_size=768,
-    overlap=0.33,
-    max_workers=4
+    images_dir, geojson_file, output_dir, tile_size=768, overlap=0.33, max_workers=4
 ):
     """Tile XView dataset into smaller chips.
 
@@ -152,28 +150,28 @@ def tile_xview_dataset(
 
     # Load GeoJSON labels
     print(f"Loading GeoJSON from {geojson_file}...")
-    with open(geojson_file, 'r') as f:
+    with open(geojson_file, "r") as f:
         geojson_data = json.load(f)
 
     # Group boxes by image_id
     image_boxes = {}
-    for feature in geojson_data['features']:
-        props = feature['properties']
-        image_id = props['image_id'].replace('.tif', '')  # Remove .tif extension
-        bounds_str = props['bounds_imcoords']  # "xmin,ymin,xmax,ymax"
-        type_id = props['type_id']
+    for feature in geojson_data["features"]:
+        props = feature["properties"]
+        image_id = props["image_id"].replace(".tif", "")  # Remove .tif extension
+        bounds_str = props["bounds_imcoords"]  # "xmin,ymin,xmax,ymax"
+        type_id = props["type_id"]
 
         # Parse bounds from string "xmin,ymin,xmax,ymax"
-        bounds = [float(x) for x in bounds_str.split(',')]
+        bounds = [float(x) for x in bounds_str.split(",")]
 
         if image_id not in image_boxes:
             image_boxes[image_id] = []
 
         # Store as [x1, y1, x2, y2, type_id]
         # Keep original type_id (11-94) - remapping happens at model level
-        image_boxes[image_id].append([
-            bounds[0], bounds[1], bounds[2], bounds[3], type_id
-        ])
+        image_boxes[image_id].append(
+            [bounds[0], bounds[1], bounds[2], bounds[3], type_id]
+        )
 
     print(f"Loaded labels for {len(image_boxes)} images")
     print(f"Loading images from {images_dir}...")

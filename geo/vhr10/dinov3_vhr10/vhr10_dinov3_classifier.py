@@ -61,13 +61,23 @@ class VHR10ClassificationWrapper(torch.utils.data.Dataset):
 
             if image.ndim == 3 and image.shape[0] in [1, 3]:
                 image = image.permute(1, 2, 0)
-            image_np = image.cpu().numpy() if isinstance(image, torch.Tensor) else np.array(image)
+            image_np = (
+                image.cpu().numpy()
+                if isinstance(image, torch.Tensor)
+                else np.array(image)
+            )
             if image_np.dtype != np.uint8:
-                image_np = (image_np * 255).astype(np.uint8) if image_np.max() <= 1.0 else image_np.astype(np.uint8)
+                image_np = (
+                    (image_np * 255).astype(np.uint8)
+                    if image_np.max() <= 1.0
+                    else image_np.astype(np.uint8)
+                )
             image = Image.fromarray(image_np)
 
         # Preprocess with DINOv3
-        pixel_values = self.processor(images=image, return_tensors="pt")["pixel_values"].squeeze(0)
+        pixel_values = self.processor(images=image, return_tensors="pt")[
+            "pixel_values"
+        ].squeeze(0)
 
         # Get all labels for accuracy computation
         if isinstance(labels, torch.Tensor) and labels.numel() > 0:
@@ -95,7 +105,9 @@ class DINOv3ViT(nn.Module):
     def __init__(self, model_name: str = "vitl16", pretrained: bool = True):
         super().__init__()
         if model_name not in DINOV3_MODELS:
-            raise ValueError(f"Model {model_name} not supported. Choose from {list(DINOV3_MODELS.keys())}")
+            raise ValueError(
+                f"Model {model_name} not supported. Choose from {list(DINOV3_MODELS.keys())}"
+            )
 
         self.model_name = model_name
         self.model_info = DINOV3_MODELS[model_name]
@@ -232,7 +244,9 @@ class ClassifierHead(nn.Module):
         if device is not None:
             classifier = classifier.to(device)
 
-        print(f"Loaded classifier from {checkpoint_path} (val_acc: {checkpoint.get('val_acc', 'N/A')})")
+        print(
+            f"Loaded classifier from {checkpoint_path} (val_acc: {checkpoint.get('val_acc', 'N/A')})"
+        )
         return classifier
 
 
@@ -243,7 +257,9 @@ class VHR10Classifier(nn.Module):
     For inference, you can use the backbone and classifier head separately.
     """
 
-    def __init__(self, num_classes=10, model_name="vitl16", pretrained=True, freeze_backbone=True):
+    def __init__(
+        self, num_classes=10, model_name="vitl16", pretrained=True, freeze_backbone=True
+    ):
         super().__init__()
         self.backbone = DINOv3ViT(model_name=model_name, pretrained=pretrained)
 
@@ -277,7 +293,9 @@ class VHR10Classifier(nn.Module):
         Returns:
             Feature embeddings [batch, embed_dim]
         """
-        with torch.set_grad_enabled(self.training and any(p.requires_grad for p in self.backbone.parameters())):
+        with torch.set_grad_enabled(
+            self.training and any(p.requires_grad for p in self.backbone.parameters())
+        ):
             return self.backbone(x)
 
 
@@ -306,8 +324,14 @@ class VHR10Trainer:
         if not torch.distributed.is_initialized():
             torch.distributed.init_process_group(backend="nccl")
 
-        self.rank = torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
-        self.world_size = torch.distributed.get_world_size() if torch.distributed.is_initialized() else 1
+        self.rank = (
+            torch.distributed.get_rank() if torch.distributed.is_initialized() else 0
+        )
+        self.world_size = (
+            torch.distributed.get_world_size()
+            if torch.distributed.is_initialized()
+            else 1
+        )
         self.device_id = self.rank % torch.cuda.device_count()
         self.device = torch.device(f"cuda:{self.device_id}")
         torch.cuda.set_device(self.device)
@@ -321,8 +345,12 @@ class VHR10Trainer:
         weight_decay=0.01,
     ):
         self.model_name = model_name
-        model = VHR10Classifier(num_classes, model_name, True, freeze_backbone).to(self.device)
-        self.model = DDP(model, device_ids=[self.device_id]) if self.world_size > 1 else model
+        model = VHR10Classifier(num_classes, model_name, True, freeze_backbone).to(
+            self.device
+        )
+        self.model = (
+            DDP(model, device_ids=[self.device_id]) if self.world_size > 1 else model
+        )
         self.criterion = nn.CrossEntropyLoss()
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
@@ -340,7 +368,9 @@ class VHR10Trainer:
 
         # Get the image processor from the model
         if self.model is None:
-            raise RuntimeError("Model must be initialized before loading data. Call init_model() first.")
+            raise RuntimeError(
+                "Model must be initialized before loading data. Call init_model() first."
+            )
 
         # Get the DINOv3 backbone to access the processor
         if isinstance(self.model, DDP):
@@ -367,15 +397,23 @@ class VHR10Trainer:
         val_size = len(full_dataset) - train_size
 
         generator = torch.Generator().manual_seed(42)  # For reproducibility
-        train_dataset, val_dataset = random_split(full_dataset, [train_size, val_size], generator=generator)
+        train_dataset, val_dataset = random_split(
+            full_dataset, [train_size, val_size], generator=generator
+        )
 
         # Wrap datasets with processor for proper preprocessing
         train_dataset = VHR10ClassificationWrapper(train_dataset, processor)
         val_dataset = VHR10ClassificationWrapper(val_dataset, processor)
 
         # Create samplers for distributed training
-        train_sampler = DistributedSampler(train_dataset) if self.world_size > 1 else None
-        val_sampler = DistributedSampler(val_dataset, shuffle=False) if self.world_size > 1 else None
+        train_sampler = (
+            DistributedSampler(train_dataset) if self.world_size > 1 else None
+        )
+        val_sampler = (
+            DistributedSampler(val_dataset, shuffle=False)
+            if self.world_size > 1
+            else None
+        )
 
         # Create dataloaders with module-level collate function
         self.train_loader = DataLoader(
@@ -398,7 +436,9 @@ class VHR10Trainer:
             collate_fn=vhr10_collate_fn,
         )
 
-        print(f"Data loaded: {len(train_dataset)} train, {len(val_dataset)} val samples")
+        print(
+            f"Data loaded: {len(train_dataset)} train, {len(val_dataset)} val samples"
+        )
 
     def train_epoch(self, epoch: int):
         """Train for one epoch.
@@ -495,7 +535,9 @@ class VHR10Trainer:
                         correct += 1
 
         if self.world_size > 1:
-            metrics = torch.tensor([running_loss, correct, total], dtype=torch.float32, device=self.device)
+            metrics = torch.tensor(
+                [running_loss, correct, total], dtype=torch.float32, device=self.device
+            )
             torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
             running_loss, correct, total = metrics.tolist()
             total_batches = len(self.val_loader) * self.world_size
@@ -566,7 +608,9 @@ class VHR10Trainer:
             # Save best model (only on rank 0)
             if self.rank == 0 and val_acc > self.best_acc:
                 self.best_acc = val_acc
-                self.save_checkpoint(f"vhr10_dinov3_{model_name}_best.pth", epoch, val_acc)
+                self.save_checkpoint(
+                    f"vhr10_dinov3_{model_name}_best.pth", epoch, val_acc
+                )
 
             print(
                 f"Rank {self.rank}: Epoch {epoch+1}/{num_epochs} - "
@@ -610,7 +654,9 @@ class VHR10Trainer:
 
         torch.save(checkpoint, checkpoint_path)
         file_size = checkpoint_path.stat().st_size / 1024
-        print(f"Saved classifier head to {checkpoint_path} ({file_size:.1f} KB, val_acc: {val_acc:.2f}%)")
+        print(
+            f"Saved classifier head to {checkpoint_path} ({file_size:.1f} KB, val_acc: {val_acc:.2f}%)"
+        )
 
     def load_checkpoint(self, checkpoint_path: str):
         """Load classifier head from checkpoint (backbone loads from HuggingFace)."""
@@ -620,13 +666,17 @@ class VHR10Trainer:
         model = self.model.module if isinstance(self.model, DDP) else self.model
 
         # Load only classifier weights (backbone is already loaded from HuggingFace)
-        classifier_state = {f"classifier.{k}": v for k, v in checkpoint["state_dict"].items()}
+        classifier_state = {
+            f"classifier.{k}": v for k, v in checkpoint["state_dict"].items()
+        }
         model.load_state_dict(classifier_state, strict=False)
 
         if self.optimizer is not None and "optimizer_state_dict" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
-        print(f"Loaded classifier head from {checkpoint_path} (val_acc: {checkpoint.get('val_acc', 'N/A')})")
+        print(
+            f"Loaded classifier head from {checkpoint_path} (val_acc: {checkpoint.get('val_acc', 'N/A')})"
+        )
         return checkpoint
 
     def extract_features(self, images):
@@ -696,7 +746,9 @@ def main():
     parser.add_argument("--epochs", type=int, default=20, help="number of epochs")
     parser.add_argument("--batch-size", type=int, default=32, help="batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
-    parser.add_argument("--data-root", type=str, default="./data", help="data root directory")
+    parser.add_argument(
+        "--data-root", type=str, default="./data", help="data root directory"
+    )
     parser.add_argument(
         "--checkpoint-dir",
         type=str,
@@ -716,7 +768,9 @@ def main():
         default=True,
         help="freeze backbone weights",
     )
-    parser.add_argument("--workers", type=int, default=2, help="number of distributed workers")
+    parser.add_argument(
+        "--workers", type=int, default=2, help="number of distributed workers"
+    )
     parser.add_argument(
         "--num-classes",
         type=int,

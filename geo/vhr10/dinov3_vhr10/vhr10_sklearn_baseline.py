@@ -56,13 +56,23 @@ class VHR10ClassificationWrapper(torch.utils.data.Dataset):
 
             if image.ndim == 3 and image.shape[0] in [1, 3]:
                 image = image.permute(1, 2, 0)
-            image_np = image.cpu().numpy() if isinstance(image, torch.Tensor) else np.array(image)
+            image_np = (
+                image.cpu().numpy()
+                if isinstance(image, torch.Tensor)
+                else np.array(image)
+            )
             if image_np.dtype != np.uint8:
-                image_np = (image_np * 255).astype(np.uint8) if image_np.max() <= 1.0 else image_np.astype(np.uint8)
+                image_np = (
+                    (image_np * 255).astype(np.uint8)
+                    if image_np.max() <= 1.0
+                    else image_np.astype(np.uint8)
+                )
             image = Image.fromarray(image_np)
 
         # Preprocess with DINOv3
-        pixel_values = self.processor(images=image, return_tensors="pt")["pixel_values"].squeeze(0)
+        pixel_values = self.processor(images=image, return_tensors="pt")[
+            "pixel_values"
+        ].squeeze(0)
 
         # Get all labels for accuracy computation
         if isinstance(labels, torch.Tensor) and labels.numel() > 0:
@@ -90,7 +100,9 @@ class DINOv3ViT(torch.nn.Module):
     def __init__(self, model_name: str = "vitl16", pretrained: bool = True):
         super().__init__()
         if model_name not in DINOV3_MODELS:
-            raise ValueError(f"Model {model_name} not supported. Choose from {list(DINOV3_MODELS.keys())}")
+            raise ValueError(
+                f"Model {model_name} not supported. Choose from {list(DINOV3_MODELS.keys())}"
+            )
 
         self.model_name = model_name
         self.model_info = DINOV3_MODELS[model_name]
@@ -174,13 +186,19 @@ class BaselineTrainer:
         val_size = len(full_dataset) - train_size
 
         generator = torch.Generator().manual_seed(42)
-        self.train_dataset, self.val_dataset = random_split(full_dataset, [train_size, val_size], generator=generator)
+        self.train_dataset, self.val_dataset = random_split(
+            full_dataset, [train_size, val_size], generator=generator
+        )
 
         # Wrap datasets with processor
-        self.train_dataset = VHR10ClassificationWrapper(self.train_dataset, self.processor)
+        self.train_dataset = VHR10ClassificationWrapper(
+            self.train_dataset, self.processor
+        )
         self.val_dataset = VHR10ClassificationWrapper(self.val_dataset, self.processor)
 
-        print(f"Data loaded: {len(self.train_dataset)} train, {len(self.val_dataset)} val samples")
+        print(
+            f"Data loaded: {len(self.train_dataset)} train, {len(self.val_dataset)} val samples"
+        )
 
     def extract_embeddings(self):
         """Extract embeddings from train and val sets."""
@@ -197,7 +215,9 @@ class BaselineTrainer:
                     labels.append(sample["label"] - 1)  # Convert 1-10 to 0-9
             return np.vstack(embeddings), np.array(labels)
 
-        print(f"\nExtracting embeddings from {len(self.train_dataset)} train, {len(self.val_dataset)} val samples...")
+        print(
+            f"\nExtracting embeddings from {len(self.train_dataset)} train, {len(self.val_dataset)} val samples..."
+        )
         train_emb, train_labels = _extract(self.train_dataset, "train")
         val_emb, val_labels = _extract(self.val_dataset, "val")
         print(f"Done: {train_emb.shape}, {val_emb.shape}")
@@ -275,7 +295,9 @@ class BaselineTrainer:
 
 def main():
     parser = argparse.ArgumentParser(description="VHR10 Sklearn Baseline with DINOv2")
-    parser.add_argument("--data-root", type=str, default="./data", help="data root directory")
+    parser.add_argument(
+        "--data-root", type=str, default="./data", help="data root directory"
+    )
     parser.add_argument(
         "--model-name",
         type=str,

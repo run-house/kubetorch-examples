@@ -1,7 +1,8 @@
 from pathlib import Path
+
 import geo.xview.data_preproc.tile_xview_dataset as tile_xview_dataset
-from geo.xview.data_preproc.utils import download_file, gcs_upload
 import kubetorch as kt
+from geo.xview.data_preproc.utils import download_file, gcs_upload
 
 XVIEW_URLS = {
     "train_images": {
@@ -17,7 +18,12 @@ XVIEW_URLS = {
 
 
 def download_and_upload_xview(
-    download_dir, gcs_bucket, gcs_prefix, skip_raw_upload, skip_processed_upload, creds_path
+    download_dir,
+    gcs_bucket,
+    gcs_prefix,
+    skip_raw_upload,
+    skip_processed_upload,
+    creds_path,
 ):
     download_dir = Path(download_dir)
     download_dir.mkdir(parents=True, exist_ok=True)
@@ -35,8 +41,7 @@ def download_and_upload_xview(
         if not extract_dir.exists():
             print(f"Extracting {tgz_path.name}...")
             subprocess.run(
-                ["tar", "-xzf", str(tgz_path), "-C", str(download_dir)],
-                check=True
+                ["tar", "-xzf", str(tgz_path), "-C", str(download_dir)], check=True
             )
         else:
             print(f"{split_name} already extracted")
@@ -46,7 +51,9 @@ def download_and_upload_xview(
         for split_name in XVIEW_URLS.keys():
             split_dir = download_dir / split_name
             if split_dir.exists():
-                gcs_upload(split_dir, gcs_bucket, f"{gcs_prefix}/{split_name}", creds_path)
+                gcs_upload(
+                    split_dir, gcs_bucket, f"{gcs_prefix}/{split_name}", creds_path
+                )
     else:
         print(f"All data downloaded to {download_dir.absolute()}")
 
@@ -56,11 +63,16 @@ def download_and_upload_xview(
         output_dir=f"{download_dir}_tiled/train",
         tile_size=768,
         overlap=0.33,
-        max_workers=4
+        max_workers=4,
     )
 
     if not skip_processed_upload:
-        gcs_upload(f"{download_dir}_tiled/train", gcs_bucket, f"{gcs_prefix}_tiled/train", creds_path)
+        gcs_upload(
+            f"{download_dir}_tiled/train",
+            gcs_bucket,
+            f"{gcs_prefix}_tiled/train",
+            creds_path,
+        )
 
 
 if __name__ == "__main__":
@@ -72,11 +84,26 @@ if __name__ == "__main__":
     skip_processed_upload = False
     local_creds_path = "/Users/paulyang/Downloads/runhouse-test-8ad14c2b4edf.json"
 
-    compute = kt.Compute(cpus=4,
-                         disk_size="100Gi",
-                         image=kt.Image().pip_install(["tqdm", "google-cloud-storage", "numpy", "Pillow"]),
-                         secrets=[kt.Secret(name="gcp-dataaccess", path=local_creds_path,)]
-                         )
+    compute = kt.Compute(
+        cpus=4,
+        disk_size="100Gi",
+        image=kt.Image().pip_install(
+            ["tqdm", "google-cloud-storage", "numpy", "Pillow"]
+        ),
+        secrets=[
+            kt.Secret(
+                name="gcp-dataaccess",
+                path=local_creds_path,
+            )
+        ],
+    )
 
     remote_download = kt.fn(download_and_upload_xview).to(compute)
-    remote_download(download_dir, gcs_bucket, gcs_prefix, skip_raw_upload, skip_processed_upload, local_creds_path)
+    remote_download(
+        download_dir,
+        gcs_bucket,
+        gcs_prefix,
+        skip_raw_upload,
+        skip_processed_upload,
+        local_creds_path,
+    )
