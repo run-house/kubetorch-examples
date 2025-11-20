@@ -52,12 +52,14 @@ class FineTuner:
         quant_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_quant_type="nf4",
-            bnb_4bit_compute_dtype=torch.bfloat16,
+            bnb_4bit_compute_dtype=torch.float16,
             bnb_4bit_use_double_quant=False,
         )  # configure the model for efficient training
 
         self.base_model = AutoModelForCausalLM.from_pretrained(
-            self.base_model_name, quantization_config=quant_config, device_map={"": 0}
+            self.base_model_name,
+            quantization_config=quant_config,
+            device_map="auto",
         )  # load the base model with the quantization configuration
 
         self.base_model.config.use_cache = False
@@ -110,7 +112,7 @@ class FineTuner:
             logging_steps=25,
             learning_rate=2e-4,
             weight_decay=0.001,
-            fp16=False,
+            fp16=True,
             bf16=False,
             max_grad_norm=0.3,
             max_steps=-1,
@@ -187,17 +189,8 @@ if __name__ == "__main__":
     # Finally, passing `huggingface` to the `env vars` method will load the Hugging Face token.
     img = (
         kt.Image(image_id="nvcr.io/nvidia/ai-workbench/python-cuda120:1.0.6")
-        .pip_install(
-            [
-                "torch",
-                "tensorboard",
-                "transformers",
-                "bitsandbytes",
-                "peft",
-                "trl",
-                "accelerate",
-                "scipy",
-            ]
+        .run_bash(
+            "uv pip install --system --break-system-packages torch scipy tensorboard transformers bitsandbytes peft trl accelerate"
         )
         .set_env_vars({"HF_TOKEN": os.environ["HF_TOKEN"]})
     )
@@ -205,6 +198,7 @@ if __name__ == "__main__":
     gpu = kt.Compute(
         gpus="1",
         memory="24Gi",
+        cpus="4",
         image=img,
         launch_timeout="1200",
     )
