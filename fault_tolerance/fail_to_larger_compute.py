@@ -95,10 +95,7 @@ if __name__ == "__main__":
             service = launch_service(name, **config)  # Launch the next size up
 
             with ThreadPoolExecutor(max_workers=10) as executor:
-                future_to_file = {
-                    executor.submit(service, filename): filename
-                    for filename in filenames
-                }
+                future_to_file = {executor.submit(service, filename): filename for filename in filenames}
                 for future in as_completed(future_to_file):
                     filename = future_to_file[future]
                     try:

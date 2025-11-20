@@ -75,9 +75,7 @@ def train(epochs, batch_size=32):
 # dispatch the current training entrypoint as-is, with no changes, similarly to below.
 def main():
     parser = argparse.ArgumentParser(description="PyTorch Distributed Training Example")
-    parser.add_argument(
-        "--epochs", type=int, default=10, help="number of epochs to train (default: 10)"
-    )
+    parser.add_argument("--epochs", type=int, default=10, help="number of epochs to train (default: 10)")
     parser.add_argument(
         "--batch-size",
         type=int,

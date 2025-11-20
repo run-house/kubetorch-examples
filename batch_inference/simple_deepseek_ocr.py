@@ -30,9 +30,7 @@ class SimpleOCR:
     def __init__(self, creds_path):
         # Kill any residual vLLM process in GPU memory upon restart
         try:
-            result = subprocess.run(
-                ["nvidia-smi"], capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(["nvidia-smi"], capture_output=True, text=True, check=True)
             for line in result.stdout.split("\n"):
                 if "vllm" in line.lower() and "C" in line:
                     elems = line.split()
@@ -149,17 +147,11 @@ def get_file_names(input_path):
 
     from google.cloud import storage
 
-    bucket_name, prefix = (
-        input_path[5:].split("/", 1) if "/" in input_path[5:] else (input_path[5:], "")
-    )
+    bucket_name, prefix = input_path[5:].split("/", 1) if "/" in input_path[5:] else (input_path[5:], "")
     client = storage.Client()
     blobs = client.bucket(bucket_name).list_blobs(prefix=prefix)
 
-    return [
-        f"gs://{bucket_name}/{blob.name}"
-        for blob in blobs
-        if Path(blob.name).suffix.lower() in extensions
-    ]
+    return [f"gs://{bucket_name}/{blob.name}" for blob in blobs if Path(blob.name).suffix.lower() in extensions]
 
 
 async def main():
@@ -181,9 +173,7 @@ async def main():
 
     start_time = time.time()
     image = (
-        kt.Image(
-            image_id="vllm/vllm-openai:nightly-66a168a197ba214a5b70a74fa2e713c9eeb3251a"
-        )
+        kt.Image(image_id="vllm/vllm-openai:nightly-66a168a197ba214a5b70a74fa2e713c9eeb3251a")
         .pip_install(
             [
                 "transformers==4.57.1",

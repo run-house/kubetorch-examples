@@ -51,9 +51,7 @@ class BERTTrainer:
 
         # Load model, tokenizer, and dataset (heavy operations which should block "ready" state)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_name, num_labels=self.num_labels
-        )
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name, num_labels=self.num_labels)
         self.dataset = self._load_dataset()
         self.epoch = 0
         self.latest_loss = None  # Track latest loss for checkpointing
@@ -68,9 +66,7 @@ class BERTTrainer:
             print("Connecting to process group...")
             torch.distributed.init_process_group(backend="nccl")
         else:
-            print(
-                "Process group already initialized, completing setup for this instance."
-            )
+            print("Process group already initialized, completing setup for this instance.")
 
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
@@ -84,9 +80,7 @@ class BERTTrainer:
         self._sync_after_restart()
 
         self.model = DDP(self.model, device_ids=[self.device])
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=self.learning_rate
-        )
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.learning_rate)
         # Create distributed sampler for multi-GPU training
         sampler = DistributedSampler(
             self.dataset,
@@ -116,11 +110,7 @@ class BERTTrainer:
         print(f"Rank {self.rank}: Saving checkpoint at epoch {self.epoch}")
 
         try:
-            model_state = (
-                self.model.module.state_dict()
-                if hasattr(self.model, "module")
-                else self.model.state_dict()
-            )
+            model_state = self.model.module.state_dict() if hasattr(self.model, "module") else self.model.state_dict()
             print(f"Rank {self.rank}: Model state extracted")
 
             checkpoint = {
@@ -148,9 +138,7 @@ class BERTTrainer:
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
             self.model.load_state_dict(checkpoint["model_state_dict"])
             self.epoch = checkpoint["epoch"] + 1
-            print(
-                f"Rank {self.rank}: Restored from local checkpoint at epoch {checkpoint['epoch']}"
-            )
+            print(f"Rank {self.rank}: Restored from local checkpoint at epoch {checkpoint['epoch']}")
         else:
             print(f"Rank {self.rank}: No local checkpoint found")
             self.epoch = 0
@@ -175,13 +163,9 @@ class BERTTrainer:
         # Don't sync if all ranks have epoch 0, i.e. no checkpoint found on any rank
         if self.epoch > 0:
             if self.rank == source_rank:
-                print(
-                    f"Rank {self.rank}: Broadcasting weights to other ranks (epoch {max_epoch})"
-                )
+                print(f"Rank {self.rank}: Broadcasting weights to other ranks (epoch {max_epoch})")
             else:
-                print(
-                    f"Rank {self.rank}: Receiving weights from rank {source_rank} (epoch {max_epoch})"
-                )
+                print(f"Rank {self.rank}: Receiving weights from rank {source_rank} (epoch {max_epoch})")
 
             for param in self.model.parameters():
                 torch.distributed.broadcast(param.data, src=source_rank)
@@ -286,9 +270,7 @@ class BERTTrainer:
             self.epoch += 1  # Update last completed epoch
             avg_epoch_loss = epoch_loss / max(num_batches, 1)
             self.latest_loss = avg_epoch_loss
-            print(
-                f"Rank {self.rank}: Epoch {epoch} complete, Avg Loss: {avg_epoch_loss:.4f}"
-            )
+            print(f"Rank {self.rank}: Epoch {epoch} complete, Avg Loss: {avg_epoch_loss:.4f}")
 
         return {
             "rank": self.rank,
@@ -302,12 +284,8 @@ class BERTTrainer:
 # The training can be interrupted at any point and will automatically resume from
 # the last checkpoint when restarted.
 def main():
-    parser = argparse.ArgumentParser(
-        description="PyTorch Distributed Training with Preemption Recovery"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=6, help="number of epochs to train (default: 5)"
-    )
+    parser = argparse.ArgumentParser(description="PyTorch Distributed Training with Preemption Recovery")
+    parser.add_argument("--epochs", type=int, default=6, help="number of epochs to train (default: 5)")
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -331,9 +309,7 @@ def main():
     # Define compute environment with GPU support
     gpus = kt.Compute(
         gpus=1,  # 1 GPU per worker
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
-            ["transformers==4.36.0", "datasets"]
-        ),
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(["transformers==4.36.0", "datasets"]),
         launch_timeout=600,
         inactivity_ttl="1h",
     ).distribute("pytorch", workers=args.workers)
@@ -383,9 +359,7 @@ def main():
             f"Epochs Completed = {rank_result['epochs_completed']}"
         )
 
-    print(
-        "\nNote: If training was interrupted, it automatically resumed from the last checkpoint!"
-    )
+    print("\nNote: If training was interrupted, it automatically resumed from the last checkpoint!")
 
 
 if __name__ == "__main__":

@@ -25,9 +25,7 @@ def download_data_gsm8k(
     train_dataset = dataset["train"]
     test_dataset = dataset["test"]
 
-    instruction_following = (
-        'Let\'s think step by step and output the final answer after "####".'
-    )
+    instruction_following = 'Let\'s think step by step and output the final answer after "####".'
 
     def make_map_fn(split):
         def extract_solution(solution_str):
@@ -82,9 +80,7 @@ def download_data_math(
     train_dataset = dataset["train"]
     test_dataset = dataset["test"]
 
-    instruction_following = (
-        "Let's think step by step and output the final answer within \\boxed{}."
-    )
+    instruction_following = "Let's think step by step and output the final answer within \\boxed{}."
 
     # add a row to each data item that represents a unique id
     def make_map_fn(split):
