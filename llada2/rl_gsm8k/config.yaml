@@ -1,0 +1,47 @@
+# LLaDA2 GRPO Training Configuration for GSM8K
+
+# Model paths
+model_path: "inclusionAI/LLaDA2.0-mini-preview"  # Base LLaDA2 model
+tokenizer_path: "inclusionAI/LLaDA2.0-mini-preview"  # Tokenizer for LLaDA2
+
+# Diffusion model settings (from SFT training)
+max_seq_len: 512  # Maximum sequence length (note: dual-sequence doubles this)
+block_size: 128  # Block size for block diffusion attention
+noise_range: [0.3, 0.8]  # Noise level range for masking (30-80%)
+mask_token_id: 156895  # Special mask token ID for noise transition
+attn_implementation: "sdpa"  # Attention implementation: "sdpa" or "flex_attention"
+
+# GRPO hyperparameters
+num_generations: 4  # Number of completions per prompt for group comparison
+learning_rate: 1.0e-6  # Learning rate (lower for full fine-tuning)
+global_batch_size: 8  # Total batch size across all workers
+micro_batch_size: 1  # Batch size per GPU
+gradient_accumulation_steps: 4  # Gradient accumulation steps
+
+# Training settings
+num_epochs: 2  # Number of training epochs
+checkpoint_interval: 4  # Save checkpoint every N steps
+warmup_ratio: 0.1  # Warmup ratio for learning rate schedule
+weight_decay: 0.01  # Weight decay for AdamW
+max_grad_norm: 1.0  # Gradient clipping norm
+use_gradient_checkpointing: true  # Enable gradient checkpointing to save memory
+
+# FSDP settings (optional)
+# fsdp_sharding_group_size: 4  # Number of GPUs that share one model replica
+# Example: 8 GPUs with fsdp_sharding_group_size=2 means 4 model replicas, each sharded across 2 GPUs
+# This enables training larger models by sharding model parameters across multiple GPUs
+# Set to world_size (default) for no sharding, or a divisor of world_size for sharding
+
+# Compute configuration
+compute:
+  inference_gpu_memory_utilization: 0.95  # GPU memory utilization for SGLang
+  inference_max_model_len: 1400  # Max total tokens for SGLang
+  diffusion_block_size: 128  # Block size for SGLang diffusion
+  diffusion_algorithm: "LowConfidence"  # Diffusion sampling algorithm
+
+# Output
+output_dir: "./checkpoints"  # Directory for saving checkpoints
+
+# Dataset
+train_data_path: "gsm8k"  # Dataset path or HuggingFace dataset name
+train_split: "train[:1000]"  # Training split (subset for faster iteration)
