@@ -118,9 +118,7 @@ class ResNet152Trainer:
         dataset = load_from_disk("~/train_dataset").with_format("torch")
 
         sampler = DistributedSampler(dataset)
-        self.train_loader = DataLoader(
-            dataset, batch_size=32, shuffle=False, sampler=sampler
-        )
+        self.train_loader = DataLoader(dataset, batch_size=32, shuffle=False, sampler=sampler)
 
     def load_validation(self, path):
         print("Loading validation data")
@@ -128,17 +126,13 @@ class ResNet152Trainer:
         dataset = load_from_disk("~/val_dataset").with_format("torch")
 
         sampler = DistributedSampler(dataset)
-        self.val_loader = DataLoader(
-            dataset, batch_size=32, shuffle=False, sampler=sampler
-        )
+        self.val_loader = DataLoader(dataset, batch_size=32, shuffle=False, sampler=sampler)
 
     def train_epoch(self):
         self.model.train()
         running_loss = 0.0
         num_batches = len(self.train_loader)
-        print_interval = max(
-            1, num_batches // 10
-        )  # Adjust this as needed, here set to every 10% of batches
+        print_interval = max(1, num_batches // 10)  # Adjust this as needed, here set to every 10% of batches
 
         for batch_idx, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
@@ -202,9 +196,7 @@ class ResNet152Trainer:
             val_accuracy = self.validate_epoch()
             print(f"scheduler stepping {epoch}")
             self.scheduler.step()
-            print(
-                f"Epoch {epoch+1}/{num_epochs}, Loss: {train_loss:.4f}, Val Accuracy: {val_accuracy:.4f}"
-            )
+            print(f"Epoch {epoch+1}/{num_epochs}, Loss: {train_loss:.4f}, Val Accuracy: {val_accuracy:.4f}")
             # Save checkpoint every few epochs or based on validation performance
             if ((epoch + 1) % 5 == 0) and self.rank == 0:
                 print("Saving checkpoint")
@@ -230,9 +222,7 @@ class ResNet152Trainer:
             [
                 transforms.Resize((224, 224)),
                 transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]
-                ),
+                transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
             ]
         )
 
@@ -255,12 +245,8 @@ if __name__ == "__main__":
     working_s3_bucket = "rh-demo-external"
     working_s3_path = "resnet-training-example/"
 
-    train_data_path = (
-        f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_imagenet/train/"
-    )
-    val_data_path = (
-        f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_imagenet/test/"
-    )
+    train_data_path = f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_imagenet/train/"
+    val_data_path = f"s3://{working_s3_bucket}/{working_s3_path}/preprocessed_imagenet/test/"
 
     # Create compute with 4 x 1 GPUs
     gpus_per_node = 1
@@ -279,9 +265,7 @@ if __name__ == "__main__":
         )
         .sync_secrets(["aws"])
     )
-    gpu_compute = kt.Compute(gpus=gpus_per_node, image=img).distribute(
-        "pytorch", workers=num_nodes
-    )
+    gpu_compute = kt.Compute(gpus=gpus_per_node, image=img).distribute("pytorch", workers=num_nodes)
 
     init_args = dict(
         s3_bucket=working_s3_bucket,

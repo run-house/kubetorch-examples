@@ -45,9 +45,7 @@ def spmd_worker_task(work_iterations=100):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Large-scale SPMD Node Connectivity Test with Kubetorch"
-    )
+    parser = argparse.ArgumentParser(description="Large-scale SPMD Node Connectivity Test with Kubetorch")
     parser.add_argument(
         "--workers",
         type=int,
@@ -129,32 +127,24 @@ def main():
             print(f"  - Workers that reported back: {len(ranks_seen)}")
             print(f"  - Unique hostnames: {len(unique_hostnames)}")
             print(f"  - Total compute result: {total_compute:.2f}")
-            print(
-                f"  - Throughput: {len(results) * args.work_iterations / elapsed_time:.2f} iterations/second"
-            )
+            print(f"  - Throughput: {len(results) * args.work_iterations / elapsed_time:.2f} iterations/second")
 
             expected_total = args.workers * args.procs
             if len(ranks_seen) == expected_total:
                 print("  SUCCESS: All workers connected and completed!")
             else:
-                print(
-                    f"  WARNING: {expected_total - len(ranks_seen)} workers did not report back"
-                )
+                print(f"  WARNING: {expected_total - len(ranks_seen)} workers did not report back")
 
             print("\nSample worker results:")
             for i, result in enumerate(results[:5]):
                 if isinstance(result, dict):
-                    print(
-                        f"  Worker {result['rank']}: {result['final_value']:.3f} on {result['hostname']}"
-                    )
+                    print(f"  Worker {result['rank']}: {result['final_value']:.3f} on {result['hostname']}")
 
             if len(results) > 10:
                 print("  ...")
                 for result in results[-5:]:
                     if isinstance(result, dict):
-                        print(
-                            f"  Worker {result['rank']}: {result['final_value']:.3f} on {result['hostname']}"
-                        )
+                        print(f"  Worker {result['rank']}: {result['final_value']:.3f} on {result['hostname']}")
 
             print("=" * 70)
         else:

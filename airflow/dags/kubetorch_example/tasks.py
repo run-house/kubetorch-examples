@@ -82,9 +82,7 @@ def deploy_inference(**kwargs):
     logger.info("Step 3: Deploy Inference")
     checkpoint_path = f"s3://{S3_BUCKET_NAME}/checkpoints/model_final.pth"
     local_checkpoint_path = "/model.pth"
-    img = kt.Image(image_id=PYTORCH_IMAGE_ID).run_bash(
-        f"aws s3 cp {checkpoint_path} {local_checkpoint_path}"
-    )
+    img = kt.Image(image_id=PYTORCH_IMAGE_ID).run_bash(f"aws s3 cp {checkpoint_path} {local_checkpoint_path}")
     inference_compute = kt.Compute(
         gpus="1",
         image=img,
@@ -92,9 +90,7 @@ def deploy_inference(**kwargs):
         inactivity_ttl="10m",
     )
 
-    inference = kt.cls(SimpleTrainer).to(
-        inference_compute, init_args={"from_checkpoint": local_checkpoint_path}
-    )
+    inference = kt.cls(SimpleTrainer).to(inference_compute, init_args={"from_checkpoint": local_checkpoint_path})
     # We distribute the inference service as an autoscaling pool of between 0 and 6 replicas, with a maximum concurrency of 16.
     inference.distribute(num_nodes=(0, 6), max_concurrency=16)
 

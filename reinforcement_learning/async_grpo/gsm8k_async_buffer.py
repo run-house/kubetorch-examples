@@ -38,9 +38,7 @@ class TrajectoryBuffer:
         for traj in trajectories:
             await self.queue.put(traj)
 
-    async def sample(
-        self, batch_size: int, timeout: float = 120.0
-    ) -> Optional[List[Trajectory]]:
+    async def sample(self, batch_size: int, timeout: float = 120.0) -> Optional[List[Trajectory]]:
         """Get a batch from the buffer."""
         batch = []
         deadline = time.time() + timeout
@@ -85,9 +83,7 @@ class vLLM:
 
         from vllm import LLM
 
-        print(
-            f"Initializing vLLM with model_id={model_id}, lora_checkpoint={lora_checkpoint}"
-        )
+        print(f"Initializing vLLM with model_id={model_id}, lora_checkpoint={lora_checkpoint}")
         self.model_id = model_id
         self.base_model_id = model_id  # Keep track of base model
         self.current_lora_request = None
@@ -181,18 +177,12 @@ class vLLM:
 
         # If we have a LoRA adapter loaded, use it
         if self.current_lora_request:
-            all_outputs = self.model.generate(
-                queries, sampling_params, lora_request=self.current_lora_request
-            )
+            all_outputs = self.model.generate(queries, sampling_params, lora_request=self.current_lora_request)
         else:
             all_outputs = self.model.generate(queries, sampling_params)
 
-        completions = [
-            output.text for outputs in all_outputs for output in outputs.outputs
-        ]
-        token_ids = [
-            output.token_ids for outputs in all_outputs for output in outputs.outputs
-        ]
+        completions = [output.text for outputs in all_outputs for output in outputs.outputs]
+        token_ids = [output.token_ids for outputs in all_outputs for output in outputs.outputs]
         return completions, token_ids
 
 
@@ -207,13 +197,9 @@ class MathAgent:
             "Do not include any units or the word answer in your response."
         )
 
-    async def answer(
-        self, questions: List[str], temperature=0.7, max_tokens=512, top_p=0.95
-    ):
+    async def answer(self, questions: List[str], temperature=0.7, max_tokens=512, top_p=0.95):
         """Generate answers for a batch of questions."""
-        prompts = [
-            f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:" for q in questions
-        ]
+        prompts = [f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:" for q in questions]
         # Since inference_service.async_ is True, generate returns a coroutine
         completions, token_ids = await self.inference_service.generate(
             prompts,
@@ -232,9 +218,7 @@ class MathAgent:
             return match.group(1).strip()
         return None
 
-    def calculate_rewards(
-        self, questions: List[str], completions: List[str], true_answers: List[str]
-    ) -> List[float]:
+    def calculate_rewards(self, questions: List[str], completions: List[str], true_answers: List[str]) -> List[float]:
         """Calculate rewards for completions based on correctness."""
         rewards = []
 
@@ -344,9 +328,7 @@ class GRPOTrainer:
         self.model.enable_input_require_grads()
         self.model.gradient_checkpointing_enable()
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_id, trust_remote_code=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -361,9 +343,7 @@ class GRPOTrainer:
         from torch.nn.parallel import DistributedDataParallel as DDP
 
         # For LoRA, wrap with DDP without find_unused_parameters
-        self.model = DDP(
-            self.model, device_ids=[self.device], find_unused_parameters=False
-        )
+        self.model = DDP(self.model, device_ids=[self.device], find_unused_parameters=False)
         print(f"Distributed training initialized on {self.device}")
 
         # Only optimize trainable parameters (much faster with LoRA)
@@ -393,9 +373,7 @@ class GRPOTrainer:
         logits = outputs.logits
 
         # Shift for next-token prediction
-        logits = logits[
-            :, prompt_ids.size(1) - 1 : -1, :
-        ]  # Get logits for completion tokens
+        logits = logits[:, prompt_ids.size(1) - 1 : -1, :]  # Get logits for completion tokens
 
         # Compute cross-entropy loss per token
         # Reshape for cross entropy
@@ -404,9 +382,7 @@ class GRPOTrainer:
         flat_targets = completion_ids.reshape(-1)
 
         # Compute per-token loss (not reduced)
-        token_losses = F.cross_entropy(
-            flat_logits, flat_targets, reduction="none"
-        ).reshape(completion_ids.shape)
+        token_losses = F.cross_entropy(flat_logits, flat_targets, reduction="none").reshape(completion_ids.shape)
 
         # Apply mask
         masked_losses = token_losses * completion_mask
@@ -416,9 +392,7 @@ class GRPOTrainer:
         token_advantages = advantages.unsqueeze(-1).expand_as(masked_losses)
 
         # Token-weighted loss (DrGRPO)
-        weighted_token_loss = (
-            masked_losses * token_advantages * completion_mask
-        ).sum() / completion_mask.sum()
+        weighted_token_loss = (masked_losses * token_advantages * completion_mask).sum() / completion_mask.sum()
 
         # Also compute standard sequence-level loss for comparison
         sequence_loss = masked_losses.sum(dim=1).mean()
@@ -461,9 +435,7 @@ class GRPOTrainer:
         advantages_tensor = advantages.view(-1).to(self.device)
 
         # Pad completion_ids
-        max_len = min(
-            max(len(ids) for ids in completion_ids), 512
-        )  # Limit completion length
+        max_len = min(max(len(ids) for ids in completion_ids), 512)  # Limit completion length
         padded_completion_ids = []
         completion_masks = []
 
@@ -473,12 +445,8 @@ class GRPOTrainer:
             padded_completion_ids.append(padded)
             completion_masks.append(mask)
 
-        completion_ids_tensor = torch.tensor(
-            padded_completion_ids, dtype=torch.long
-        ).to(self.device)
-        completion_mask_tensor = torch.tensor(completion_masks, dtype=torch.float).to(
-            self.device
-        )
+        completion_ids_tensor = torch.tensor(padded_completion_ids, dtype=torch.long).to(self.device)
+        completion_mask_tensor = torch.tensor(completion_masks, dtype=torch.float).to(self.device)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float).to(self.device)
 
         # Process in microbatches to save memory
@@ -536,14 +504,10 @@ class GRPOTrainer:
         self.checkpoint_version += 1
 
         # Save LoRA adapters only (much smaller and faster)
-        checkpoint_path = Path(
-            f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
-        )
+        checkpoint_path = Path(f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps")
 
         # Get the underlying model (unwrap DDP if needed)
-        model_to_save = (
-            self.model.module if hasattr(self.model, "module") else self.model
-        )
+        model_to_save = self.model.module if hasattr(self.model, "module") else self.model
 
         # Save only the LoRA adapters - this will create the proper adapter_config.json
         model_to_save.save_pretrained(checkpoint_path.resolve())
@@ -559,9 +523,7 @@ class GRPOTrainer:
             json.dump(metadata, f, indent=2)
 
         self.latest_checkpoint = str(checkpoint_path)
-        print(
-            f"LoRA checkpoint v{self.checkpoint_version} saved at {self.latest_checkpoint}"
-        )
+        print(f"LoRA checkpoint v{self.checkpoint_version} saved at {self.latest_checkpoint}")
         return {
             "checkpoint_path": self.latest_checkpoint,
             "version": self.checkpoint_version,
@@ -578,9 +540,7 @@ class GRPOTrainer:
         # the AsyncOffPolicyGRPO.
         inference_service.compute.image.rsync(source=self.latest_checkpoint, dest="./")
 
-        print(
-            f"Redeploying inference service with checkpoint: {self.latest_checkpoint}"
-        )
+        print(f"Redeploying inference service with checkpoint: {self.latest_checkpoint}")
 
         # For LoRA, pass the adapter path for hot-swapping
         init_args = {
@@ -640,15 +600,11 @@ class AsyncOffPolicyGRPO:
         )
 
         # Calculate rewards
-        rewards = self.agent.calculate_rewards(
-            expanded_prompts, completions, expanded_answers
-        )
+        rewards = self.agent.calculate_rewards(expanded_prompts, completions, expanded_answers)
 
         # Create trajectory objects
         trajectories = []
-        for prompt, completion, ids, reward in zip(
-            expanded_prompts, completions, token_ids, rewards
-        ):
+        for prompt, completion, ids, reward in zip(expanded_prompts, completions, token_ids, rewards):
             traj = Trajectory(
                 prompt=prompt,
                 completion=completion,
@@ -682,8 +638,7 @@ class AsyncOffPolicyGRPO:
                     self.max_concurrent_batches,
                     max(
                         2,
-                        self.min_buffer_size
-                        // (self.batch_size * self.num_generations),
+                        self.min_buffer_size // (self.batch_size * self.num_generations),
                     ),
                 )
             else:
@@ -704,9 +659,7 @@ class AsyncOffPolicyGRPO:
                     end_idx = min(self.batch_size, len(indices))
 
                 # Create task for this batch
-                task = asyncio.create_task(
-                    self.process_batch(dataset, indices, start_idx, end_idx)
-                )
+                task = asyncio.create_task(self.process_batch(dataset, indices, start_idx, end_idx))
                 pending_tasks.add(task)
                 batch_idx += 1
 
@@ -717,9 +670,7 @@ class AsyncOffPolicyGRPO:
 
             # Wait for at least one task to complete
             if pending_tasks:
-                done, pending_tasks = await asyncio.wait(
-                    pending_tasks, return_when=asyncio.FIRST_COMPLETED
-                )
+                done, pending_tasks = await asyncio.wait(pending_tasks, return_when=asyncio.FIRST_COMPLETED)
 
                 # Process completed tasks
                 for task in done:
@@ -728,9 +679,7 @@ class AsyncOffPolicyGRPO:
                         await self.buffer.add(trajectories)
 
                         buffer_size = self.buffer.size()
-                        print(
-                            f"Added {len(trajectories)} trajectories. Buffer size: {buffer_size}"
-                        )
+                        print(f"Added {len(trajectories)} trajectories. Buffer size: {buffer_size}")
                     except Exception as e:
                         print(f"Error processing batch: {e}")
             else:
@@ -755,17 +704,11 @@ class AsyncOffPolicyGRPO:
             # the trainer can still use them (and drop any stragglers)
             if len(trajectories) % self.num_generations != 0:
                 # Trim to the largest multiple of num_generations
-                aligned_size = (
-                    len(trajectories) // self.num_generations
-                ) * self.num_generations
+                aligned_size = (len(trajectories) // self.num_generations) * self.num_generations
                 if aligned_size == 0:
-                    print(
-                        f"Training: Batch too small ({len(trajectories)} < {self.num_generations}), skipping"
-                    )
+                    print(f"Training: Batch too small ({len(trajectories)} < {self.num_generations}), skipping")
                     continue
-                print(
-                    f"Training: Trimming incomplete batch from {len(trajectories)} to {aligned_size} trajectories"
-                )
+                print(f"Training: Trimming incomplete batch from {len(trajectories)} to {aligned_size} trajectories")
                 trajectories = trajectories[:aligned_size]
 
             # Unpack trajectories into the format expected by train_batch
@@ -782,9 +725,7 @@ class AsyncOffPolicyGRPO:
                 rewards=rewards,
                 num_generations=self.num_generations,
             )
-            metrics = (
-                metrics_list[0] if metrics_list else {}
-            )  # Only need metrics from one worker
+            metrics = metrics_list[0] if metrics_list else {}  # Only need metrics from one worker
 
             self.training_steps += 1
 
@@ -807,9 +748,7 @@ class AsyncOffPolicyGRPO:
             # Periodically save and update inference checkpoint
             if self.training_steps % self.checkpoint_update_interval == 0:
                 print(f"Saving checkpoint after {self.training_steps} steps...")
-                checkpoint_info_list = await self.train_service.save_checkpoint(
-                    workers=[0]
-                )
+                checkpoint_info_list = await self.train_service.save_checkpoint(workers=[0])
                 checkpoint_info = checkpoint_info_list[0]
 
                 # We only want the first value back
@@ -850,9 +789,7 @@ class AsyncOffPolicyGRPO:
         print("Starting async off-policy GRPO training...")
 
         # Start both loops concurrently
-        inference_task = asyncio.create_task(
-            self.inference_loop(dataset, num_batches=batches_per_epoch)
-        )
+        inference_task = asyncio.create_task(self.inference_loop(dataset, num_batches=batches_per_epoch))
         training_task = asyncio.create_task(self.training_loop())
 
         # Run for specified duration
@@ -871,10 +808,7 @@ class AsyncOffPolicyGRPO:
                     training_task.result()
 
                 buffer_size = self.buffer.size()
-                print(
-                    f"Progress: {self.training_steps}/{target_steps} steps, "
-                    f"Buffer size: {buffer_size}"
-                )
+                print(f"Progress: {self.training_steps}/{target_steps} steps, " f"Buffer size: {buffer_size}")
 
             # Final checkpoint
             await self.train_service.save_checkpoint()
@@ -966,9 +900,7 @@ async def main():
         max_concurrent_batches=2,  # Start conservatively with 2 concurrent batches
     )
 
-    await pipeline.run(
-        dataset, num_epochs=num_epochs, batches_per_epoch=batches_per_epoch
-    )
+    await pipeline.run(dataset, num_epochs=num_epochs, batches_per_epoch=batches_per_epoch)
 
 
 if __name__ == "__main__":

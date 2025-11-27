@@ -15,12 +15,8 @@ def preprocess_data(s3_read_path, s3_write_path, filename):
     ratings = StandardScaler(columns=["rating"]).fit_transform(ratings)
 
     # Split the dataset into train, eval, and test sets
-    train_ds, remaining_ds = ratings.train_test_split(
-        test_size=0.3, shuffle=True, seed=42
-    )
-    eval_ds, test_ds = remaining_ds.train_test_split(
-        test_size=0.5, shuffle=True, seed=42
-    )
+    train_ds, remaining_ds = ratings.train_test_split(test_size=0.3, shuffle=True, seed=42)
+    eval_ds, test_ds = remaining_ds.train_test_split(test_size=0.5, shuffle=True, seed=42)
     print(train_ds.schema())
 
     # Save processed data to S3
@@ -55,9 +51,7 @@ if __name__ == "__main__":
     )
 
     # Create compute with 8 CPUs and 32GB of memory
-    compute = kt.Compute(
-        cpus="2", memory="10Gi", image=img, secrets=[kt.secret(provider="aws")]
-    ).distribute(
+    compute = kt.Compute(cpus="2", memory="10Gi", image=img, secrets=[kt.secret(provider="aws")]).distribute(
         "ray",
         workers=workers,
     )
@@ -70,6 +64,4 @@ if __name__ == "__main__":
     filename = "ratings.csv"
     s3_preprocessed = "s3://rh-demo-external/dlrm-training-example/preprocessed_data"
 
-    remote_preprocess(
-        s3_read_path=s3_raw, s3_write_path=s3_preprocessed, filename=filename
-    )
+    remote_preprocess(s3_read_path=s3_raw, s3_write_path=s3_preprocessed, filename=filename)
