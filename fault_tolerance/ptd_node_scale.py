@@ -23,9 +23,7 @@ def distributed_train_cpu(epochs, iterations_per_epoch=10):
         print(f"Rank {rank}/{world_size} initialized")
 
     # Minimal model for low memory usage
-    model = torch.nn.Sequential(
-        torch.nn.Linear(100, 50), torch.nn.ReLU(), torch.nn.Linear(50, 1)
-    )
+    model = torch.nn.Sequential(torch.nn.Linear(100, 50), torch.nn.ReLU(), torch.nn.Linear(50, 1))
 
     model = DDP(model)
     optimizer = torch.optim.SGD(model.parameters(), lr=0.01)
@@ -75,18 +73,14 @@ def distributed_train_cpu(epochs, iterations_per_epoch=10):
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Large-scale CPU PyTorch Distributed Training with Kubetorch"
-    )
+    parser = argparse.ArgumentParser(description="Large-scale CPU PyTorch Distributed Training with Kubetorch")
     parser.add_argument(
         "--workers",
         type=int,
         default=400,
         help="Number of CPU worker nodes (default: 400)",
     )
-    parser.add_argument(
-        "--epochs", type=int, default=5, help="Number of training epochs (default: 5)"
-    )
+    parser.add_argument("--epochs", type=int, default=5, help="Number of training epochs (default: 5)")
     parser.add_argument(
         "--iterations",
         type=int,
@@ -122,9 +116,7 @@ def main():
     print("\nStarting distributed training...")
 
     try:
-        results = distributed_train(
-            epochs=args.epochs, iterations_per_epoch=args.iterations
-        )
+        results = distributed_train(epochs=args.epochs, iterations_per_epoch=args.iterations)
 
         elapsed_time = time.time() - start_time
 
@@ -136,9 +128,7 @@ def main():
                 print("Training Summary:")
                 print(f"  - Total workers: {rank_0_result['world_size']}")
                 print(f"  - Training time: {elapsed_time:.2f} seconds")
-                print(
-                    f"  - Average final value: {rank_0_result['avg_final_value']:.4f}"
-                )
+                print(f"  - Average final value: {rank_0_result['avg_final_value']:.4f}")
                 print(
                     f"  - Throughput: {args.workers * args.epochs * args.iterations / elapsed_time:.2f} iterations/second"
                 )

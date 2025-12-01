@@ -17,9 +17,7 @@ class SimpleTrainer:
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.model = SimpleNN().to(self.device)
         if from_checkpoint:
-            self.model.load_state_dict(
-                torch.load(from_checkpoint, map_location=self.device)
-            )
+            self.model.load_state_dict(torch.load(from_checkpoint, map_location=self.device))
 
         self.train_loader = None
         self.test_loader = None
@@ -28,9 +26,7 @@ class SimpleTrainer:
 
     def load_data(self, path, batch_size, download=True):
         def mnist(is_train):
-            return datasets.MNIST(
-                path, train=is_train, download=download, transform=self.transform
-            )
+            return datasets.MNIST(path, train=is_train, download=download, transform=self.transform)
 
         self.train_loader = DataLoader(mnist(True), batch_size=batch_size, shuffle=True)
         self.test_loader = DataLoader(mnist(False), batch_size=batch_size)
@@ -68,9 +64,7 @@ class SimpleTrainer:
                 correct += (output.argmax(1) == target).sum().item()
 
         n = len(self.test_loader.dataset)
-        print(
-            f"Test loss: {total_loss/n:.4f}, Accuracy: {correct}/{n} ({100. * correct/n:.2f}%)"
-        )
+        print(f"Test loss: {total_loss/n:.4f}, Accuracy: {correct}/{n} ({100. * correct/n:.2f}%)")
 
     def predict(self, data):
         self.model.eval()

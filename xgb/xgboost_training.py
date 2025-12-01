@@ -32,9 +32,7 @@ class Trainer:
         X_test = self._preprocess_features(X_test)
 
         # Split test into validation and test
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_train, y_train, test_size=0.2, random_state=42
-        )
+        X_train, X_val, y_train, y_val = train_test_split(X_train, y_train, test_size=0.2, random_state=42)
 
         self.dtrain = xgb.DMatrix(X_train, label=y_train)
         self.dtest = xgb.DMatrix(X_test, label=y_test)
