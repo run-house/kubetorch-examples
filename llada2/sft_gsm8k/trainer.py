@@ -34,16 +34,9 @@ except ImportError:
         "Warning: FlexAttention not available. Install PyTorch 2.5+ for better performance."
     )
 
-import sys
-
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_parent_dir = os.path.dirname(_current_dir)
-sys.path.insert(0, _parent_dir)
-sys.path.insert(0, _current_dir)
-
-from data import collate_fn, LLaDA2Dataset
-from llada2_moe_vanilla import LLaDA2Config, LLaDA2DecoderLayer, LLaDA2ForCausalLM
-from utils import create_block_diffusion_mask, get_cosine_schedule_with_warmup
+from llada2.data import collate_fn, LLaDA2Dataset
+from llada2.llada2_moe_vanilla import LLaDA2Config, LLaDA2DecoderLayer, LLaDA2ForCausalLM
+from llada2.utils import create_block_diffusion_mask, get_cosine_schedule_with_warmup
 
 
 class LLaDA2Trainer:

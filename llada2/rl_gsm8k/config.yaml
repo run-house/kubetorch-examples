@@ -15,12 +15,12 @@ attn_implementation: "sdpa"  # Attention implementation: "sdpa" or "flex_attenti
 num_generations: 4  # Number of completions per prompt for group comparison
 learning_rate: 1.0e-6  # Learning rate (lower for full fine-tuning)
 global_batch_size: 8  # Total batch size across all workers
-micro_batch_size: 1  # Batch size per GPU
+micro_batch_size: 2  # Batch size per GPU
 gradient_accumulation_steps: 4  # Gradient accumulation steps
 
 # Training settings
 num_epochs: 2  # Number of training epochs
-checkpoint_interval: 4  # Save checkpoint every N steps
+checkpoint_interval: 5  # Save checkpoint every N steps
 warmup_ratio: 0.1  # Warmup ratio for learning rate schedule
 weight_decay: 0.01  # Weight decay for AdamW
 max_grad_norm: 1.0  # Gradient clipping norm

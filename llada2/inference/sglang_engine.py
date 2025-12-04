@@ -15,7 +15,7 @@ Based on the fork: https://github.com/ClawSeven/sglang/tree/dev-dllm
 """
 
 from typing import Any, Dict, List, Optional, Tuple
-
+import os 
 import kubetorch as kt
 
 
@@ -44,8 +44,6 @@ class SGLang:
     ):
         self.checkpoint_version = checkpoint_version
         self.model_id = model_id
-        self.engine = None
-        self.tokenizer = None
         self.server_process = None
         self.server_url = None
 
@@ -58,28 +56,33 @@ class SGLang:
             self.server_url = kt_cached_state.get(
                 "server_url", "http://127.0.0.1:30000"
             )
-            self.engine = None
-            self.tokenizer = None
-            try:
-                with httpx.Client() as client:
-                    client.get(f"{self.server_url}/health", timeout=5.0)
-                return
-            except:
-                print("Failed to find active server on reload, starting from scratch")
 
+            if self._check_health():
+                return
+            else:
+                print("Failed to find active SGLang on reload, starting from scratch")
+        
         # Create new server if not cached
         print(f"Creating new SGLang server (version {self.checkpoint_version})")
 
-        # Use the checkpoint path as model if provided, otherwise use base model
+        # Use the checkpoint path as model if provided, otherwise download base model
         # This ensures we read from local disk for RL scenarios
-        model_path = model_checkpoint if model_checkpoint else model_id
+        if model_checkpoint:
+            model_path = model_checkpoint
+            print(f"Using checkpoint: {model_path}")
+        else:
+            # Download model from HuggingFace if not already cached
+            import os
+            from huggingface_hub import snapshot_download
+
+            if os.path.exists(model_id) and os.path.isdir(model_id):
+                model_path = model_id
+            else:
+                model_path = snapshot_download(repo_id=model_id, local_dir=model_id)
 
         # NOTE: Merge disabled - SGLang's dev-dllm fork doesn't support merged MoE weights
         # The SGLang implementation expects individual expert keys (experts.0.gate_proj, etc.)
         # not merged tensors (experts.gate_proj with shape [num_experts, ...])
-        #
-        # # Merge MoE experts for optimized inference (if needed)
-        # # The merged format enables faster Triton kernels and better SGLang performance
         # import sys
         # parent_dir = os.path.dirname(os.path.dirname(__file__))
         # if parent_dir not in sys.path:
@@ -90,73 +93,59 @@ class SGLang:
         # Configure engine using config values
         compute_config = config.get("compute", {}) if config else {}
 
-        # Start SGLang HTTP server (avoids event loop conflicts)
-        # The server runs in its own process with continuous batching
         import subprocess
         import sys
 
         # Build server command
         port = 30000
         host = "127.0.0.1"
-
-        cmd = [
-            sys.executable,
-            "-m",
-            "sglang.launch_server",
-            "--model-path",
-            model_path,
-            "--tokenizer-path",
-            model_id,  # Use base model's tokenizer for LLaDA2
-            "--host",
-            host,
-            "--port",
-            str(port),
-            "--dtype",
-            "bfloat16",
+        cmd = [ # fmt: off
+            sys.executable, "-m", "sglang.launch_server", "--model-path", model_path, 
+            "--tokenizer-path", model_id,  # Use base model's tokenizer for LLaDA2
+            "--host", host, 
+            "--port", str(port), 
+            "--dtype", "bfloat16",
             "--trust-remote-code",
-            "--mem-fraction-static",
-            str(compute_config.get("inference_gpu_memory_utilization", 0.9)),
-            "--max-total-tokens",
-            str(compute_config.get("inference_max_model_len", 1024)),
-            "--context-length",
-            str(compute_config.get("inference_max_model_len", 1024)),
-            "--diffusion-block-size",
-            str(compute_config.get("diffusion_block_size", 128)),
-            "--diffusion-algorithm",
-            str(compute_config.get("diffusion_algorithm", "LowConfidence")),
-            # " > sglang_server.log 2>&1"
+            "--mem-fraction-static", str(compute_config.get("inference_gpu_memory_utilization", 0.9)),
+            "--max-total-tokens", str(compute_config.get("inference_max_model_len", 2048)),
+            "--context-length", str(compute_config.get("inference_max_model_len", 1024)),
+            "--dllm-block-size", str(compute_config.get("diffusion_block_size", 128)),
+            "--dllm-algorithm", str(compute_config.get("diffusion_algorithm", "LowConfidence")),
+            # " > sglang_server.log"
         ]
 
         print(f"Starting SGLang HTTP server on {host}:{port}...")
         print(f"Command: {' '.join(cmd)}")
 
-        # Launch server as subprocess
+        # Launch server and check for up
         self.server_process = subprocess.Popen(
-            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
+            cmd #, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
         )
         self.server_url = f"http://{host}:{port}"
 
         import time
 
-        # Wait for server to be ready
-        import httpx
-
         for i in range(50):
-            try:
-                with httpx.Client() as client:
-                    client.get(f"{self.server_url}/health", timeout=10.0)
+            if self._check_health():
                 print(f"SGLang server ready at {self.server_url}")
                 break
-            except:
-                time.sleep(5)
+            print('Retrying')
+            time.sleep(15)
         else:
             raise RuntimeError("SGLang server failed to start")
 
-        # Store server info
-        self.engine = None  # Not using direct engine anymore
-        self.tokenizer = None  # Tokenization handled by server
-
         print(f"SGLang server initialized with model: {model_path}")
+
+    def _check_health(self):
+        import httpx
+        try:
+            with httpx.Client() as client:
+                response = client.get(f"{self.server_url}/health", timeout=15.0)
+                print(f"Health check response: {response.status_code} - {response.text}")
+                return response.status_code == 200
+        except Exception as e:
+            print('Failed check', e)
+            return False
 
     def __kt_cached_state__(self) -> Dict[str, Any]:
         """Return state to be cached by Kubetorch across reloads.
@@ -178,49 +167,24 @@ class SGLang:
     async def generate(
         self, prompts: List[str], request_version: Optional[int] = None, **kwargs
     ) -> Tuple[List[str], List[List[int]]]:
-        """Generate completions for the given prompts.
+        # if request_version is not None and request_version != self.checkpoint_version:
+        #     print(
+        #         f"Ignoring stale request from version {request_version} "
+        #         f"(current: {self.checkpoint_version})"
+        #     )
+        #     return [""] * len(prompts), [[]] * len(prompts)
 
-        This method processes prompts asynchronously and returns both text completions
-        and token IDs. It supports version tracking to filter stale requests from
-        old checkpoint versions.
-
-        Args:
-            prompts: List of prompt strings to generate from
-            request_version: Version number of the checkpoint that created this request.
-                           If it doesn't match current checkpoint_version, the request
-                           is ignored (returns empty results).
-            **kwargs: Additional sampling parameters (temperature, top_p, max_tokens, etc.)
-
-        Returns:
-            Tuple of (completions, token_ids) where:
-                - completions: List of generated text strings
-                - token_ids: List of token ID lists
-        """
-        # Check if this request is from an old checkpoint version
-        if request_version is not None and request_version != self.checkpoint_version:
-            print(
-                f"Ignoring stale request from version {request_version} "
-                f"(current: {self.checkpoint_version})"
-            )
-            # Return empty results for stale requests
-            return [""] * len(prompts), [[]] * len(prompts)
-
-        # Extract sampling parameters for SGLang
         sampling_params = {
             "temperature": kwargs.get("temperature", 0.6),
             "top_p": kwargs.get("top_p", 0.95),
-            "max_new_tokens": kwargs.get("max_tokens", 1024),
+            "max_new_tokens": kwargs.get("max_tokens", 512),
         }
 
-        # Process all prompts as a batch
         print(
             f"Processing {len(prompts)} prompts with SGLang engine v{self.checkpoint_version} (batch mode)"
         )
 
-        # Use HTTP API to avoid event loop conflicts
         import httpx
-
-        # Prepare request payload
         request_data = {
             "text": prompts if isinstance(prompts, list) else [prompts],
             "sampling_params": {
@@ -230,18 +194,27 @@ class SGLang:
             },
         }
 
-        # Make async HTTP request to SGLang server
         async with httpx.AsyncClient(timeout=600.0) as client:
             response = await client.post(
                 f"{self.server_url}/generate", json=request_data
             )
+
+            # Debug: Log response details if there's an error
+            if response.status_code != 200:
+                print(f"ERROR: SGLang returned {response.status_code}")
+                print(f"Request payload: {request_data}")
+                try:
+                    error_detail = response.json()
+                    print(f"Response JSON: {error_detail}")
+                except:
+                    print(f"Response text: {response.text}")
+
             response.raise_for_status()
             results = response.json()
 
         print(f"Batch generation completed: {len(results)} results")
 
         # Extract completions from HTTP response
-        # SGLang HTTP API returns: [{"text": "...", "meta_info": {...}}, ...]
         completions = []
         token_ids_list = []
 
@@ -251,7 +224,6 @@ class SGLang:
             completions.append(completion)
 
             # Token IDs from output_ids field (actual token IDs list)
-            # Note: completion_tokens in meta_info is just a count (int), not the IDs
             tokens = result.get("output_ids", [])
             print(
                 f"DEBUG tokens type: {type(tokens)}, value: {tokens[:10] if len(tokens) > 10 else tokens}..."
@@ -273,35 +245,36 @@ class SGLang:
         """TODO"""
         pass
 
-    async def update_weights_from_disk(self, checkpoint_path: str, new_version: int):
+    async def update_weights_from_disk(self, key: str, new_version: int, checkpoint_subdir: str):
         """Update model weights from disk without restarting the engine.
 
-        This method loads weights from disk, which is slower than update_weights_from_tensor
-        but useful when weights are only available on disk.
-
-        For RL workflows with frequent updates, prefer update_weights_from_tensor instead.
-
         Args:
-            checkpoint_path: Local path to the checkpoint directory
-            new_version: New checkpoint version number
-
-        Raises:
-            RuntimeError if weight update fails or server becomes unhealthy
+            key: The key used in kt.vput/kt.get
+            new_version: Version number for the checkpoint
+            checkpoint_subdir: The subdirectory name created by kt.get (e.g., "checkpoint-v1-step100")
         """
-        print(
-            f"Updating weights from {checkpoint_path} (v{self.checkpoint_version} -> v{new_version})"
+
+        import os
+
+        # Ensure destination directory exists before syncing
+        dest_path = key + f"_{new_version}"
+        os.makedirs(dest_path, exist_ok=True)
+
+        await kt.get_async(
+            key=key,
+            dest=dest_path,
+            seed_data=False,
         )
+        print('Gotten the file!')
+        # Construct full model path including subdirectory
+        full_model_path = os.path.join(dest_path, checkpoint_subdir)
 
-        import time
-
-        # Use HTTP API to update weights
         import httpx
-
         try:
             async with httpx.AsyncClient(timeout=600.0) as client:
                 response = await client.post(
                     f"{self.server_url}/update_weights_from_disk",
-                    json={"model_path": checkpoint_path},
+                    json={"model_path": full_model_path},
                 )
                 response.raise_for_status()
         except Exception as e:
@@ -310,25 +283,16 @@ class SGLang:
 
             traceback.print_exc()
             raise RuntimeError(
-                f"Failed to update weights from {checkpoint_path}: {e}"
+                f"Failed to update weights: {e}"
             ) from e
 
         # Verify server is still healthy after weight update
         print("Verifying SGLang server health after weight update...")
+        import asyncio
         for i in range(10):
-            try:
-                async with httpx.AsyncClient(timeout=30.0) as client:
-                    health_response = await client.get(f"{self.server_url}/health")
-                    if health_response.status_code == 200:
-                        print(f"Server healthy after weight update (attempt {i+1})")
-                        break
-            except Exception as e:
-                print(f"Server health check failed (attempt {i+1}/10): {e}")
-                if i == 9:
-                    raise RuntimeError(
-                        f"Server became unhealthy after weight update: {e}"
-                    ) from e
-                time.sleep(2)
+            await asyncio.sleep(3)
+            if self._check_health():
+                break
         else:
             raise RuntimeError("Server health check timed out after weight update")
 
@@ -337,20 +301,47 @@ class SGLang:
         self.checkpoint_version = new_version
 
         print(f"Successfully updated weights from v{old_version} to v{new_version}")
+
+        # Clean up the previous version's destination directory after successful sync
+        import shutil
+        if old_version > 0:
+            old_dest_path = key + f"_{old_version}"
+            if os.path.exists(old_dest_path):
+                try:
+                    shutil.rmtree(old_dest_path)
+                    print(f"Cleaned up old checkpoint: {old_dest_path}")
+                except Exception as e:
+                    print(f"Warning: Failed to clean up old checkpoint {old_dest_path}: {e}")
+
         return True
 
 
-if __name__ == "__main__":
+async def main(): 
     img = (
-        kt.Image(image_id="lmsysorg/sglang:latest")
+        kt.Image(image_id="lmsysorg/sglang:v0.5.6")
         # .run_bash("apt-get update && apt-get install -y libnuma-dev")
         # .run_bash("uv pip install --system --break-system-packages sgl_kernel")
         .run_bash(
             "uv pip install --break-system-packages --system 'git+https://github.com/ClawSeven/sglang.git@dev-dllm#subdirectory=python'"
         )
+        .pip_install(["huggingface_hub"])
+        .set_env_vars({"HF_TOKEN": os.environ["HF_TOKEN"]})
     )
-    compute = kt.Compute(gpus=1, image=img)
+    compute = kt.Compute(gpus=1, memory = "150Gi", image=img, allowed_serialization=["json", "pickle"])
 
-    infer = kt.cls(SGLang).to(compute)
-    result = infer.generate(["Why does camus say sisyphus is happy?"])
+    infer = kt.cls(SGLang).to(compute, get_if_exists=True)
+    infer._async = True 
+    # result = await infer.generate(["Why does camus say sisyphus is happy?"], max_tokens = 512)
+    # print(result)
+    
+    key = "model_v2"
+    result = await infer.update_weights_from_disk(key, 2, "checkpoint-v2-step0")
     print(result)
+
+    result = await infer.generate(["Why does camus say sisyphus is happy?"], max_tokens = 512)
+    print(result)
+
+
+if __name__ == "__main__":
+    import asyncio 
+    asyncio.run(main())

@@ -1,9 +1,27 @@
+"""Shared data processing utilities for LLaDA2 diffusion training.
+
+This module contains data utilities used across different training modes (SFT, RL, etc.):
+- Noise transition functions for diffusion process
+- Chat template application
+- Dataset and collate functions
+"""
+
 import json
 
 import torch
 
 
 def apply_chat_template(messages, tokenizer, max_seq_len):
+    """Apply chat template and create labels.
+
+    Args:
+        messages: List of chat messages
+        tokenizer: Tokenizer instance
+        max_seq_len: Maximum sequence length
+
+    Returns:
+        Tuple of (input_ids, labels)
+    """
     text = tokenizer.apply_chat_template(
         messages, tokenize=False, add_generation_prompt=False
     )
@@ -24,6 +42,20 @@ def apply_chat_template(messages, tokenizer, max_seq_len):
 
 
 def sft_noise_transition(input_ids, labels, noise_range, mask_token_id):
+    """Apply noise transition for diffusion training.
+
+    Randomly masks tokens according to a noise level sampled from noise_range.
+    This is used in both SFT and RL training to create the noisy input sequence.
+
+    Args:
+        input_ids: Input token IDs [seq_len]
+        labels: Labels for masking (None for RL, tensor for SFT)
+        noise_range: Tuple of (min_noise, max_noise) e.g., (0.3, 0.8)
+        mask_token_id: Token ID to use for masking
+
+    Returns:
+        noisy_input_ids: Input IDs with random tokens masked
+    """
     noise_level = (
         torch.rand(1).item() * (noise_range[1] - noise_range[0]) + noise_range[0]
     )
@@ -49,6 +81,18 @@ def sft_noise_transition(input_ids, labels, noise_range, mask_token_id):
 
 
 def process_example(example, tokenizer, max_seq_len, noise_range, mask_token_id):
+    """Process a single training example for diffusion SFT.
+
+    Args:
+        example: Dictionary with 'messages' key
+        tokenizer: Tokenizer instance
+        max_seq_len: Maximum sequence length
+        noise_range: Noise level range for masking
+        mask_token_id: Token ID for masking
+
+    Returns:
+        Dictionary with input_ids, noisy_input_ids, and labels
+    """
     messages = example["messages"]
     input_ids, labels = apply_chat_template(messages, tokenizer, max_seq_len)
     noisy_input_ids = sft_noise_transition(
@@ -63,7 +107,22 @@ def process_example(example, tokenizer, max_seq_len, noise_range, mask_token_id)
 
 
 class LLaDA2Dataset(torch.utils.data.Dataset):
+    """Dataset for LLaDA2 diffusion training.
+
+    Loads JSONL data and applies noise transition for diffusion process.
+    Each line should contain a dictionary with a 'messages' key.
+    """
+
     def __init__(self, data_path, tokenizer, max_seq_len, noise_range, mask_token_id):
+        """Initialize dataset.
+
+        Args:
+            data_path: Path to JSONL file
+            tokenizer: Tokenizer instance
+            max_seq_len: Maximum sequence length
+            noise_range: Tuple of (min_noise, max_noise)
+            mask_token_id: Token ID for masking
+        """
         self.data = []
         with open(data_path, "r") as f:
             for line in f:
@@ -88,6 +147,14 @@ class LLaDA2Dataset(torch.utils.data.Dataset):
 
 
 def collate_fn(batch):
+    """Collate function for DataLoader.
+
+    Args:
+        batch: List of dictionaries from dataset
+
+    Returns:
+        Dictionary with stacked tensors
+    """
     return {
         "input_ids": torch.stack([x["input_ids"] for x in batch]),
         "noisy_input_ids": torch.stack([x["noisy_input_ids"] for x in batch]),

@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any, Dict, List, Tuple
 
 import numpy as np
-
+import kubetorch as kt 
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
@@ -48,15 +48,9 @@ except ImportError:
     FLEX_ATTENTION_AVAILABLE = False
 
 # Import LLaDA2 components
-import sys
-
-_current_dir = os.path.dirname(os.path.abspath(__file__))
-_parent_dir = os.path.dirname(_current_dir)
-sys.path.insert(0, _parent_dir)
-
-from llada2_moe_vanilla import LLaDA2Config, LLaDA2DecoderLayer, LLaDA2ForCausalLM
-from sft_gsm8k.data import sft_noise_transition
-from utils import create_block_diffusion_mask
+from llada2.llada2_moe_vanilla import LLaDA2Config, LLaDA2DecoderLayer, LLaDA2ForCausalLM
+from llada2.data import sft_noise_transition
+from llada2.utils import create_block_diffusion_mask
 
 
 class GRPOTrainer:
@@ -68,13 +62,35 @@ class GRPOTrainer:
     - Updates model to increase likelihood of better trajectories
     """
 
-    def __init__(self, config_path: str = None, config: Dict = None):
+    def __init__(self, config_path: str = None, config: Dict = None, kt_cached_state=None):
         """Initialize trainer with config.
 
         Args:
             config_path: Path to YAML config file
             config: Config dictionary (takes precedence over config_path)
         """
+
+        if kt_cached_state:
+            print(
+                f"Reusing existing trainer from cached state"
+            )
+            # Restore all attributes from cached state
+            self.config = kt_cached_state["config"]
+            self.model = kt_cached_state["model"]
+            self.tokenizer = kt_cached_state["tokenizer"]
+            self.optimizer = kt_cached_state["optimizer"]
+            self.scheduler = kt_cached_state["scheduler"]
+            self.attn_mask = kt_cached_state["attn_mask"]
+            self.device = kt_cached_state["device"]
+            self.steps = kt_cached_state["steps"]
+            self.checkpoint_version = kt_cached_state["checkpoint_version"]
+            self.global_rank = kt_cached_state["global_rank"]
+            self.local_rank = kt_cached_state["local_rank"]
+            self.world_size = kt_cached_state["world_size"]
+
+            return
+            
+
         if config is not None:
             self.config = config
         elif config_path is not None:
@@ -103,21 +119,40 @@ class GRPOTrainer:
         self.local_rank = None
         self.world_size = None
 
-    def setup(self):
+    def setup(self, skip = False):
         """Initialize model, optimizer, and distributed training."""
-        self.setup_distributed()
+        if not skip: 
+            self.setup_distributed()
 
-        if self.global_rank == 0:
-            print(f"Setting up LLaDA2 GRPO Trainer with {self.world_size} GPUs")
-            os.makedirs(self.config.get("output_dir", "./checkpoints"), exist_ok=True)
+            if self.global_rank == 0:
+                print(f"Setting up LLaDA2 GRPO Trainer with {self.world_size} GPUs")
+                os.makedirs(self.config.get("output_dir", "./checkpoints"), exist_ok=True)
 
-        self.setup_tokenizer()
-        self.setup_model()
-        self.setup_optimizer()
-        self.setup_attention_mask()
+            self.setup_tokenizer()
+            self.setup_model()
+            self.setup_optimizer()
+            self.setup_attention_mask()
 
-        if self.global_rank == 0:
-            print("GRPO Trainer setup complete")
+            if self.global_rank == 0:
+                print("GRPO Trainer setup complete")
+
+    def __kt_cached_state__(self) -> Dict[str, Any]:
+        """Return state to be cached by Kubetorch across reloads."""
+        # Preserve model, optimizer, and training state across reloads
+        return {
+            "config": self.config,
+            "model": self.model,
+            "tokenizer": self.tokenizer,
+            "optimizer": self.optimizer,
+            "scheduler": self.scheduler,
+            "attn_mask": self.attn_mask,
+            "device": self.device,
+            "steps": self.steps,
+            "checkpoint_version": self.checkpoint_version,
+            "global_rank": self.global_rank,
+            "local_rank": self.local_rank,
+            "world_size": self.world_size,
+        }
 
     def setup_distributed(self):
         """Setup distributed training with NCCL backend and FSDP process groups."""
@@ -202,6 +237,13 @@ class GRPOTrainer:
         All ranks try to download if path doesn't exist. Filesystem handles
         the race condition - first rank creates the directory, others wait.
         """
+        from pathlib import Path
+
+        # Path("inclusionAI/LLaDA2.0-mini-preview").mkdir(parents=True, exist_ok=True)
+
+        # kt.get(key="py-sglang/inclusionAI/LLaDA2.0-mini-preview/LLaDA2.0-mini-preview/", seed_data=False, dest="inclusionAI/LLaDA2.0-mini-preview", contents=True, force =True)
+
+
         if not os.path.exists(model_path):
             print(
                 f"[RANK {self.global_rank}] Model not found at {model_path}, downloading from HuggingFace..."
@@ -213,7 +255,6 @@ class GRPOTrainer:
                 print(f"[RANK {self.global_rank}] Model downloaded successfully")
             except Exception as e:
                 print(f"[RANK {self.global_rank}] Download attempt: {e}")
-                # Likely already downloaded by another rank, continue
 
         # Wait for all ranks to reach this point
         dist.barrier()
@@ -732,13 +773,13 @@ class GRPOTrainer:
         else:
             return {"metrics": local_metrics, "timings": timings, "step": self.steps}
 
-    def save_checkpoint(self) -> Tuple[str, int]:
+    def save_checkpoint(self) -> Tuple[str, int, str]:
         """Save model checkpoint.
 
         With FSDP sharding, this gathers the full state dict on rank 0 only.
 
         Returns:
-            Tuple of (checkpoint_path, checkpoint_version)
+            Tuple of (key, checkpoint_version, checkpoint_subdir)
         """
         self.checkpoint_version += 1
         checkpoint_path = (
@@ -773,47 +814,52 @@ class GRPOTrainer:
                 )
 
         dist.barrier()
-
-        return str(checkpoint_path), self.checkpoint_version
-
-    async def redeploy_inference(
-        self,
-        inference_service,
-        checkpoint_path: str,
-        serialization: str = "pickle",
-    ):
-        """Redeploy inference service with new checkpoint.
-
-        Uses rsync to transfer checkpoint files from trainer to inference service,
-        then calls HTTP API to hot-swap weights.
-
-        Args:
-            inference_service: SGLang inference service
-            checkpoint_path: Path to checkpoint directory
-            serialization: Serialization method (compatibility parameter)
-
-        Returns:
-            Updated inference service
-        """
+        key = f"model_v{self.checkpoint_version}"
         if self.global_rank == 0:
-            print(f"Hot-swapping inference service to v{self.checkpoint_version}")
-            print(f"  Syncing checkpoint: {checkpoint_path}")
+            print(f'Putting {checkpoint_path} to {key}')
+            kt.vput(key=key, src = str(checkpoint_path))
 
-            # Rsync checkpoint to inference service's filesystem
-            inference_service.compute.image.rsync(source=checkpoint_path, dest="./")
+        return key, self.checkpoint_version, checkpoint_path.name
 
-            # Call HTTP API to update weights from synced checkpoint
-            # Use basename since rsync puts it in current directory
-            checkpoint_basename = os.path.basename(checkpoint_path.rstrip("/"))
 
-            # This raises RuntimeError if update fails or server becomes unhealthy
-            await inference_service.update_weights_from_disk(
-                checkpoint_path=checkpoint_basename, new_version=self.checkpoint_version
-            )
+if __name__ == "__main__": 
+    import os
 
-            print(f"Successfully hot-swapped to v{self.checkpoint_version}")
+    import yaml
 
-        # Barrier to ensure all workers wait for hot-swap completion
-        dist.barrier()
+    # Load config
+    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    with open(config_path, "r") as f:
+        config = yaml.safe_load(f)
 
-        return inference_service
+
+    train_img = (
+        kt.Image(image_id="nvcr.io/nvidia/ai-workbench/python-cuda126:1.0.2")
+        .run_bash(
+            "uv pip install --system --break-system-packages torch torchvision torchaudio triton datasets transformers wandb diffusers tiktoken torchdata psutil timm einops safetensors pyyaml"
+        )
+        .pip_install(["bitsandbytes", "liger-kernel"])
+        .set_env_vars(
+            {
+                "TOKENIZERS_PARALLELISM": "false",
+                "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+                "HF_TOKEN": os.environ["HF_TOKEN"]
+            }
+        )
+    )
+
+    num_workers = 3
+    gpus_per_worker = 1
+    train_compute = kt.Compute(
+        gpus=gpus_per_worker,
+        image=train_img,
+        launch_timeout=1200,
+        allowed_serialization=["json", "pickle"],
+    ).distribute("pytorch", workers=num_workers)
+
+    train_service = kt.cls(GRPOTrainer).to(
+        train_compute, init_args={"config": config}, get_if_exists=True
+    )
+    # train_service.setup() 
+    print(train_service.save_checkpoint())
+
