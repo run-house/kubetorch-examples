@@ -1,276 +1,135 @@
+"""Async GRPO Training for LLaDA2 on GSM8K.
+
+Entry point for reinforcement learning with Group Relative Policy Optimization.
+Uses AsyncGRPOScheduler for coordinating inference and training.
+"""
 import asyncio
 import os
 
 import kubetorch as kt
-import numpy as np
 
 from llada2.inference.sglang_engine import SGLang
 from llada2.rl_gsm8k.math_agent import SimpleMathAgent
+from llada2.rl_gsm8k.scheduler import AsyncGRPOScheduler
 from llada2.rl_gsm8k.trainer import GRPOTrainer
 
 
-async def simple_async_grpo(
-    dataset,
-    train_service,
-    inference_service,
-    num_epochs=3,
-    batch_size=8,
-    num_generations=4,
-    checkpoint_interval=10,
-):
-    agent = SimpleMathAgent(inference_service, checkpoint_version=0)
-    indices = np.random.permutation(len(dataset))
-
-    training_tasks = []
-    inference_tasks = []
-    steps_completed = 0
-    print(batch_size)
-    total_steps = num_epochs * len(indices) // batch_size
-
-    # Lock to ensure only ONE train_batch() call at a time
-    # Multiple inferences can run in parallel, but training must be serial for FSDP
-    training_lock = asyncio.Lock()
-
-    print(f"Starting simple async GRPO for {total_steps} steps")
-
-    for epoch in range(num_epochs):
-        print(f"\n=== Epoch {epoch + 1}/{num_epochs} ===")
-
-        for i in range(0, len(indices), batch_size):
-            # Control parallelism - limit concurrent inferences to avoid overwhelming GPU memory
-            max_inference_parallel = 2  # Max parallel inference requests
-            max_training_pending = 3  # Max pending training tasks (including currently training)
-
-            # Clean up completed inference tasks that finished
-            done_inference = [t for t in inference_tasks if t.done()]
-            for task in done_inference:
-                inference_tasks.remove(task)
-
-            # Wait if too many inferences are running
-            while len(inference_tasks) >= max_inference_parallel:
-                await asyncio.sleep(
-                    0.1
-                )  # Yield to event loop so inference tasks can run
-                done_inference = [t for t in inference_tasks if t.done()]
-                for task in done_inference:
-                    inference_tasks.remove(task)
-
-            # Clean up completed training tasks (training is serialized by lock)
-            done_tasks = [t for t in training_tasks if t.done()]
-            for task in done_tasks:
-                training_tasks.remove(task)
-                await task  # Ensure exceptions are raised
-
-            # Wait if too many training tasks are pending to prevent inference from running too far ahead
-            while len(training_tasks) >= max_training_pending:
-                await asyncio.sleep(
-                    0.1
-                )  # Yield to event loop so training tasks can progress
-                done_tasks = [t for t in training_tasks if t.done()]
-                for task in done_tasks:
-                    training_tasks.remove(task)
-                    await task  # Ensure exceptions are raised
-
-            # Get batch data
-            batch_indices = indices[i : i + batch_size]
-            questions = [dataset[int(idx)]["question"] for idx in batch_indices]
-            answers = [dataset[int(idx)]["answer"] for idx in batch_indices]
-
-            # Start inference task
-            current_step = steps_completed + 1
-            inference_task = asyncio.create_task(
-                agent.generate_batch(
-                    questions, answers, num_generations, step_num=current_step
-                )
-            )
-            inference_tasks.append(inference_task)
-            print(f"[SCHEDULER] Launched inference for step {current_step}")
-
-            # When inference completes, start training
-            async def train_when_ready(inf_task, step_num):
-                print(f"[TRAINING] Waiting for inference results for step {step_num}")
-                result = await inf_task
-                inference_tasks.remove(inf_task)
-
-                # Check if result was stale and skipped
-                if result[0] is None:
-                    print(
-                        f"[TRAINING] Skipping training for stale request at step {step_num}"
-                    )
-                    return step_num
-
-                prompts, completions, token_ids, rewards = result
-
-                # Acquire lock to ensure only ONE train_batch() call at a time
-                # This is critical for FSDP - concurrent calls will corrupt memory
-                async with training_lock:
-                    print(
-                        f"[TRAINING] Starting training for step {step_num} (lock acquired)"
-                    )
-
-                    # Train on this batch (data will be split by the service automatically)
-                    # This await completes only after ALL distributed workers finish (including barrier)
-                    metrics = await train_service.train_batch(
-                        prompts, completions, token_ids, rewards, num_generations
-                    )
-
-                    # Verify we got valid metrics (training actually ran)
-                    if (
-                        not metrics
-                        or not isinstance(metrics, list)
-                        or len(metrics) == 0
-                    ):
-                        raise RuntimeError(
-                            f"Training failed to return valid metrics for step {step_num}: {metrics}"
-                        )
-
-                    # Find rank 0 result (the one with non-empty metrics)
-                    rank0_result = next((m for m in metrics if m.get('metrics')), None)
-                    if not rank0_result:
-                        raise RuntimeError(
-                            f"No worker returned valid metrics for step {step_num}: {metrics}"
-                        )
-
-                    print(
-                        f"[TRAINING] Completed step {step_num}: loss={rank0_result['metrics']['loss']:.4f}, "
-                        f"reward={rank0_result['metrics']['reward_mean']:.3f} (ALL workers synced)"
-                    )
-
-                    # Save checkpoint periodically (must be inside lock - accesses model)
-                    # Training is guaranteed complete at this point (barrier passed)
-                    if step_num % checkpoint_interval == 0:
-                        print(
-                            f"[CHECKPOINT] Training complete for step {step_num}, saving checkpoint..."
-                        )
-
-                        # Save checkpoint (kubetorch SPMD returns list of results from each worker)
-                        # This waits for all workers to save their checkpoint shards
-                        checkpoint_results = await train_service.save_checkpoint()
-                        # Take result from rank 0 worker
-                        checkpoint_result = (
-                            checkpoint_results[0]
-                            if isinstance(checkpoint_results, list)
-                            else checkpoint_results
-                        )
-                        key, new_version, checkpoint_folder = checkpoint_result
-                        print(f"[CHECKPOINT] Checkpoint saved: {key}")
-
-                        print(
-                            f"[CHECKPOINT] Hot-swapping inference to v{new_version}..."
-                        )
-                        # Use training service to redeploy inference with new checkpoint
-                        # This rsyncs checkpoint and calls update_weights_from_disk
-                        # If update fails, this will raise an exception and halt training
-                        try:
-                            await agent.inference_service.update_weights_from_disk(key, new_version, checkpoint_folder)
-                            print(f"[CHECKPOINT] Hot-swap complete: v{new_version} @ {key}")
-                        except Exception as e:
-                            print(f"[CHECKPOINT] FATAL: Hot-swap failed: {e}")
-                            print(
-                                "[CHECKPOINT] Inference service may be unhealthy, halting training"
-                            )
-                            raise RuntimeError(
-                                f"Checkpoint hot-swap failed at step {step_num}"
-                            ) from e
-
-                return step_num
-
-            # Create training task that waits for inference
-            training_task = asyncio.create_task(
-                train_when_ready(inference_task, steps_completed + 1)
-            )
-            training_tasks.append(training_task)
-            steps_completed += 1
-
-    # Wait for remaining tasks
-    await asyncio.gather(*training_tasks)
-    print("\nTraining complete!")
-
-
-async def main():
-    import os
-
+def load_config():
+    """Load training config from YAML."""
     import yaml
-    from datasets import load_dataset
 
-    # Load config
     config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
     with open(config_path, "r") as f:
-        config = yaml.safe_load(f)
+        return yaml.safe_load(f)
 
-    print(f"Loaded config from {config_path}")
 
-    # Load dataset
-    print("Loading GSM8K dataset...")
-    dataset_split = config.get("train_split", "train[:100]")
-    dataset = load_dataset("gsm8k", "main", split=dataset_split)
+def load_dataset(split: str):
+    """Load GSM8K dataset."""
+    from datasets import load_dataset
+    return load_dataset("gsm8k", "main", split=split)
 
-    # Setup inference service - single GPU with async engine
-    inference_img = kt.Image(image_id="lmsysorg/sglang:v0.5.6").run_bash(
-        "uv pip install --break-system-packages --system 'git+https://github.com/ClawSeven/sglang.git@dev-dllm#subdirectory=python'"
-    ).set_env_vars({"HF_TOKEN": os.environ["HF_TOKEN"]})
-    inference_compute = kt.Compute(gpus=1, memory = "150Gi", image=inference_img, launch_timeout=1200)
 
-    # Setup training service - distributed across multiple GPUs
+async def deploy_services(config, get_if_exists=True):
+    """Deploy inference and training services via kubetorch.
+
+    Returns:
+        Tuple of (inference_service, train_service)
+    """
+    # Inference image (SGLang)
+    inference_img = (
+        kt.Image(image_id="lmsysorg/sglang:v0.5.6")
+        .run_bash(
+            "uv pip install --break-system-packages --system "
+            "'git+https://github.com/ClawSeven/sglang.git@dev-dllm#subdirectory=python'"
+        )
+        .set_env_vars({"HF_TOKEN": os.environ["HF_TOKEN"]})
+    )
+    inference_compute = kt.Compute(
+        gpus=1, memory="150Gi", image=inference_img, launch_timeout=1200
+    )
+
+    # Training image (PyTorch + FSDP)
     train_img = (
         kt.Image(image_id="nvcr.io/nvidia/ai-workbench/python-cuda126:1.0.2")
         .run_bash(
-            "uv pip install --system --break-system-packages torch torchvision torchaudio triton datasets transformers wandb diffusers tiktoken torchdata psutil timm einops safetensors pyyaml"
+            "uv pip install --system --break-system-packages "
+            "torch torchvision torchaudio triton datasets transformers wandb "
+            "diffusers tiktoken torchdata psutil timm einops safetensors pyyaml"
         )
         .pip_install(["bitsandbytes", "liger-kernel"])
-        .set_env_vars(
-            {
-                "TOKENIZERS_PARALLELISM": "false",
-                "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
-                "HF_TOKEN": os.environ["HF_TOKEN"],
-            }
-        )
+        .set_env_vars({
+            "TOKENIZERS_PARALLELISM": "false",
+            "TORCH_NCCL_AVOID_RECORD_STREAMS": "1",
+            "HF_TOKEN": os.environ["HF_TOKEN"],
+        })
     )
 
-    # Use number of workers from config or default to 2
     num_workers = config.get("num_training_workers", 3)
     gpus_per_worker = config.get("num_gpus_per_worker", 1)
     train_compute = kt.Compute(
         gpus=gpus_per_worker,
+        memory="150Gi",
         image=train_img,
         launch_timeout=1200,
         allowed_serialization=["json", "pickle"],
     ).distribute("pytorch", workers=num_workers)
 
-    # Deploy services in parallel - Kubetorch handles the orchestration
     print("Deploying services...")
-    inference_service_task = kt.cls(SGLang).to_async(
-        inference_compute,
-        init_args={
-            "model_id": config["model_path"],
-            "checkpoint_version": 0,
-            "config": config,
-        },
-        get_if_exists=True,
-    )
-    train_service_task = kt.cls(GRPOTrainer).to_async(
-        train_compute, init_args={"config": config}, get_if_exists=True
-    )
+
+    async def deploy_training():
+        service = await kt.cls(GRPOTrainer).to_async(
+            train_compute, init_args={"config": config}, get_if_exists=get_if_exists
+        )
+        service.async_ = True
+        await service.setup()
+        return service
+
+    # All in parallel: inference deploy + (training deploy + setup)
     inference_service, train_service = await asyncio.gather(
-        inference_service_task, train_service_task
+        kt.cls(SGLang).to_async(
+            inference_compute,
+            init_args={"model_id": config["model_path"], "checkpoint_version": 0, "config": config},
+            get_if_exists=get_if_exists,
+        ),
+        deploy_training(),
+    )
+    inference_service.async_ = True
+
+    return inference_service, train_service
+
+
+async def main():
+    """Main entry point."""
+    config = load_config()
+    print(f"Loaded config from config.yaml")
+
+    # Load dataset
+    dataset_split = config.get("train_split", "train[:100]")
+    print(f"Loading GSM8K dataset: {dataset_split}")
+    dataset = load_dataset(dataset_split)
+
+    # Deploy services
+    inference_service, train_service = await deploy_services(config, False)
+
+    # Create agent and scheduler
+    agent = SimpleMathAgent(inference_service, checkpoint_version=0)
+    scheduler = AsyncGRPOScheduler(
+        train_service=train_service,
+        agent=agent,
+        max_inference_parallel=2,
+        max_training_pending=3,
+        checkpoint_interval=config.get("checkpoint_interval", 10),
     )
 
-    # Enable async mode for non-blocking calls
-    inference_service.async_ = True
-    train_service.async_ = True
+    # Run training
+    num_generations = config.get("num_generations", 4)
+    batch_size = config.get("global_batch_size", 32) // num_generations
 
-    # Initialize distributed training
-    # await train_service.setup()
-
-    # Run the async GRPO training loop with config values
-    await simple_async_grpo(
+    await scheduler.run(
         dataset,
-        train_service,
-        inference_service,
         num_epochs=config.get("num_epochs", 2),
-        batch_size=config.get("global_batch_size", 32) // config.get("num_generations", 4),
-        num_generations=config.get("num_generations", 4),
-        checkpoint_interval=config.get("checkpoint_interval", 10),
+        batch_size=batch_size,
+        num_generations=num_generations,
     )
 
 

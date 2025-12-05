@@ -1,41 +1,64 @@
-import re
+"""Math problem solving agent for GRPO training.
+
+Generates completions and computes rewards for math problems.
+"""
+from typing import List, Optional, Tuple
+
+from llada2.rl_gsm8k.rewards import compute_math_rewards
 
 
 class SimpleMathAgent:
-    """Math problem solver using vLLM."""
+    """Math problem solver using inference service."""
 
-    def __init__(self, inference_service, checkpoint_version=0):
+    SYSTEM_PROMPT = (
+        "You are a helpful math assistant. "
+        "Solve the following problem step by step. "
+        "End with '#### <answer>' where <answer> is just the number."
+    )
+
+    def __init__(self, inference_service, checkpoint_version: int = 0):
+        """Initialize agent.
+
+        Args:
+            inference_service: Async inference service
+            checkpoint_version: Current checkpoint version for staleness detection
+        """
         self.inference_service = inference_service
         self.checkpoint_version = checkpoint_version
-        self.system_prompt = (
-            "You are a helpful math assistant. "
-            "Solve the following problem step by step. "
-            "End with '#### <answer>' where <answer> is just the number."
-        )
 
     async def generate_batch(
-        self, questions, answers, num_generations=4, step_num=None
-    ):
-        """Generate multiple completions per question and calculate rewards."""
-        if step_num:
-            print(
-                f"[INFERENCE] Starting generation for step {step_num} (checkpoint v{self.checkpoint_version})"
-            )
+        self,
+        questions: List[str],
+        answers: List[str],
+        num_generations: int = 4,
+        step_num: Optional[int] = None,
+    ) -> Tuple[Optional[List[str]], Optional[List[str]], Optional[List[List[int]]], Optional[List[float]]]:
+        """Generate completions and compute rewards.
 
-        # Expand for multiple generations
-        expanded_questions = []
-        expanded_answers = []
-        for q, a in zip(questions, answers):
-            expanded_questions.extend([q] * num_generations)
-            expanded_answers.extend([a] * num_generations)
+        Args:
+            questions: Problem questions
+            answers: True answers
+            num_generations: Completions per question (K for GRPO)
+            step_num: Current training step (for logging)
+
+        Returns:
+            Tuple of (prompts, completions, token_ids, rewards) or all None if stale
+        """
+        if step_num:
+            print(f"[INFERENCE] Starting step {step_num} (v{self.checkpoint_version})")
+
+        # Expand for K generations per question
+        expanded_questions, expanded_answers = self._expand_batch(
+            questions, answers, num_generations
+        )
 
         # Format prompts
         prompts = [
-            f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:"
+            f"{self.SYSTEM_PROMPT}\n\nQuestion: {q}\n\nSolution:"
             for q in expanded_questions
         ]
 
-        # Generate completions with version tracking
+        # Generate completions
         completions, token_ids = await self.inference_service.generate(
             prompts,
             request_version=self.checkpoint_version,
@@ -45,31 +68,29 @@ class SimpleMathAgent:
         )
 
         if step_num:
-            print(f"[INFERENCE] Completed generation for step {step_num}")
+            print(f"[INFERENCE] Completed step {step_num}")
 
-        # Check if request was ignored due to being stale
+        # Check for stale request
         if all(c == "" for c in completions):
-            print(
-                f"Request was stale (version {self.checkpoint_version}), skipping batch"
-            )
+            print(f"Request stale (v{self.checkpoint_version}), skipping")
             return None, None, None, None
 
-        # Calculate rewards
-        rewards = []
-        for completion, true_answer in zip(completions, expanded_answers):
-            # Extract predicted answer
-            match = re.search(r"####\s*([-+]?\d*\.?\d+)", completion)
-            pred_answer = match.group(1).strip() if match else None
+        # Compute rewards
+        rewards = compute_math_rewards(completions, expanded_answers)
 
-            # Extract true answer
-            true_match = re.search(r"####\s*([-+]?\d*\.?\d+)", true_answer)
-            true_value = (
-                true_match.group(1).strip() if true_match else true_answer.strip()
-            )
-
-            # Simple reward: 1.0 for correct, -0.2 for wrong
-            reward = 1.0 if pred_answer == true_value else -0.2
-            rewards.append(reward)
-
-        print(f"[INFERENCE] Generated {len(completions)} samples.")
+        print(f"[INFERENCE] Generated {len(completions)} samples")
         return prompts, completions, token_ids, rewards
+
+    def _expand_batch(
+        self,
+        questions: List[str],
+        answers: List[str],
+        num_generations: int,
+    ) -> Tuple[List[str], List[str]]:
+        """Expand batch for K generations per question."""
+        expanded_questions = []
+        expanded_answers = []
+        for q, a in zip(questions, answers):
+            expanded_questions.extend([q] * num_generations)
+            expanded_answers.extend([a] * num_generations)
+        return expanded_questions, expanded_answers

@@ -1,0 +1,32 @@
+# LLaDA2 SFT Training Configuration
+
+# Model
+model_path: "./inclusionAI/LLaDA2.0-mini-preview"
+tokenizer_path: "./inclusionAI/LLaDA2.0-mini-preview"
+
+# Diffusion
+max_seq_len: 1024
+block_size: 32
+noise_range: [0.3, 0.8]
+mask_token_id: 156895
+attn_implementation: "sdpa"
+
+# Data
+train_data_path: "./gsm8k_datasets/gsm8k_train.jsonl"
+
+# Training
+num_epochs: 1
+global_batch_size: 16
+micro_batch_size: 8
+learning_rate: 1.0e-5
+weight_decay: 0.1
+max_grad_norm: 1.0
+warmup_ratio: 0.03
+use_gradient_checkpointing: true
+
+# Logging and checkpointing
+log_steps: 10
+save_steps: 500
+
+# Output
+output_dir: "./llada2_sft_outputs"

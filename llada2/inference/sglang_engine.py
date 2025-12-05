@@ -331,15 +331,17 @@ async def main():
 
     infer = kt.cls(SGLang).to(compute, get_if_exists=True)
     infer._async = True 
-    # result = await infer.generate(["Why does camus say sisyphus is happy?"], max_tokens = 512)
-    # print(result)
-    
-    key = "model_v2"
-    result = await infer.update_weights_from_disk(key, 2, "checkpoint-v2-step0")
-    print(result)
-
     result = await infer.generate(["Why does camus say sisyphus is happy?"], max_tokens = 512)
     print(result)
+    import time 
+    time.sleep(5)
+    
+    # key = "model_v2"
+    # result = await infer.update_weights_from_disk(key, 2, "checkpoint-v2-step0")
+    # print(result)
+
+    # result = await infer.generate(["Why does camus say sisyphus is happy?"], max_tokens = 512)
+    # print(result)
 
 
 if __name__ == "__main__":

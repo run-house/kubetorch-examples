@@ -26,6 +26,10 @@ weight_decay: 0.01  # Weight decay for AdamW
 max_grad_norm: 1.0  # Gradient clipping norm
 use_gradient_checkpointing: true  # Enable gradient checkpointing to save memory
 
+# Entropy dropout (optional speedup - skip tokens model is confident about)
+entropy_dropout: true  # Set true to enable
+entropy_threshold: 0.01  # Drop tokens with normalized entropy below this (0-1)
+
 # FSDP settings (optional)
 # fsdp_sharding_group_size: 4  # Number of GPUs that share one model replica
 # Example: 8 GPUs with fsdp_sharding_group_size=2 means 4 model replicas, each sharded across 2 GPUs
