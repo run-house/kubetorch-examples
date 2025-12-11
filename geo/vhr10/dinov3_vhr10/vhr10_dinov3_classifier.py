@@ -7,6 +7,7 @@ After training, you would want to take your
 
 import argparse
 import os
+import time
 from pathlib import Path
 
 import kubetorch as kt
@@ -29,19 +30,20 @@ DINOV3_MODELS = {
 
 
 def vhr10_collate_fn(batch):
-    """Collate function for VHR10, used in Dataloader"""
+    """Collate function for VHR10 multi-label classification."""
     images = torch.stack([item["image"] for item in batch])
-    labels = torch.tensor([item["label"] for item in batch])
-    all_labels = [item["all_labels"] for item in batch]
-    return {"image": images, "label": labels, "all_labels": all_labels}
+    labels = torch.stack([item["label"] for item in batch])  # Multi-hot vectors
+    return {"image": images, "label": labels}
 
 
 class VHR10ClassificationWrapper(torch.utils.data.Dataset):
-    """Converts VHR10 detection to classification.
+    """Converts VHR10 detection to multi-label classification.
 
-    Training: Uses most common label for loss computation
-    Accuracy: Checks if prediction matches any label in the image
+    Returns multi-hot encoded label vectors for BCE loss.
+    VHR10 has 10 classes (originally 1-indexed, converted to 0-indexed).
     """
+
+    NUM_CLASSES = 10
 
     def __init__(self, dataset, processor):
         self.dataset = dataset
@@ -53,7 +55,7 @@ class VHR10ClassificationWrapper(torch.utils.data.Dataset):
     def __getitem__(self, idx):
         sample = self.dataset[idx]
         image = sample["image"]
-        labels = sample.get("labels", torch.tensor([]))  # VHR10 uses 'labels' (plural)
+        labels = sample.get("label", torch.tensor([]))
 
         # Convert tensor to PIL
         if isinstance(image, torch.Tensor):
@@ -79,20 +81,17 @@ class VHR10ClassificationWrapper(torch.utils.data.Dataset):
             "pixel_values"
         ].squeeze(0)
 
-        # Get all labels for accuracy computation
+        # Create multi-hot label vector
+        # VHR10 labels are 1-indexed (1-10), convert to 0-indexed (0-9)
+        multi_hot = torch.zeros(self.NUM_CLASSES, dtype=torch.float32)
         if isinstance(labels, torch.Tensor) and labels.numel() > 0:
-            all_labels = labels.tolist()
+            for lab in labels.tolist():
+                multi_hot[lab - 1] = 1.0
         elif isinstance(labels, (list, tuple)) and len(labels) > 0:
-            all_labels = list(labels)
-        else:
-            all_labels = [0]
+            for lab in labels:
+                multi_hot[lab - 1] = 1.0
 
-        # For training: use most common label
-        from collections import Counter
-
-        label = Counter(all_labels).most_common(1)[0][0]
-
-        return {"image": pixel_values, "label": label, "all_labels": all_labels}
+        return {"image": pixel_values, "label": multi_hot}
 
 
 class DINOv3ViT(nn.Module):
@@ -351,7 +350,7 @@ class VHR10Trainer:
         self.model = (
             DDP(model, device_ids=[self.device_id]) if self.world_size > 1 else model
         )
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = nn.BCEWithLogitsLoss()
         self.optimizer = torch.optim.AdamW(
             filter(lambda p: p.requires_grad, self.model.parameters()),
             lr=lr,
@@ -440,28 +439,28 @@ class VHR10Trainer:
             f"Data loaded: {len(train_dataset)} train, {len(val_dataset)} val samples"
         )
 
-    def train_epoch(self, epoch: int):
-        """Train for one epoch.
+    def train_epoch(self, epoch: int, threshold: float = 0.3):
+        """Train for one epoch with multi-label classification.
 
         The training explicitly separates the backbone and classifier calls:
         1. Extract features from backbone
         2. Pass features through classifier head
 
-        Loss: Computed using most common label
-        Accuracy: Prediction is correct if it matches ANY label in the image
+        Uses BCEWithLogitsLoss and sigmoid for multi-label predictions.
+        Metrics: F1 score (macro-averaged across classes)
         """
         self.model.train()
         running_loss = 0.0
-        correct = 0
-        total = 0
+        total_tp = 0  # True positives
+        total_fp = 0  # False positives
+        total_fn = 0  # False negatives
 
         num_batches = len(self.train_loader)
         print_interval = max(1, num_batches // 10)
 
         for batch_idx, batch in enumerate(self.train_loader):
             images = batch["image"].to(self.device)
-            labels = batch["label"].to(self.device)
-            all_labels = batch["all_labels"]
+            labels = batch["label"].to(self.device)  # Multi-hot vectors
 
             # Forward pass - explicitly separate backbone and classifier
             self.optimizer.zero_grad()
@@ -479,89 +478,132 @@ class VHR10Trainer:
             loss.backward()
             self.optimizer.step()
 
-            # Statistics
             running_loss += loss.item()
-            _, predicted = outputs.max(1)
-            total += labels.size(0)
+            preds = torch.sigmoid(outputs) > threshold
+            targets = labels.bool()
 
-            # Accuracy: check if prediction is in any of the labels for each image
-            for i, pred in enumerate(predicted):
-                if pred.item() in all_labels[i]:
-                    correct += 1
+            total_tp += (preds & targets).sum().item()
+            total_fp += (preds & ~targets).sum().item()
+            total_fn += (~preds & targets).sum().item()
 
             if (batch_idx + 1) % print_interval == 0:
+                # Compute running F1
+                precision = total_tp / (total_tp + total_fp + 1e-8)
+                recall = total_tp / (total_tp + total_fn + 1e-8)
+                f1 = 2 * precision * recall / (precision + recall + 1e-8)
                 print(
                     f"Rank {self.rank}: Epoch {epoch}, Batch {batch_idx+1}/{num_batches}, "
-                    f"Loss: {loss.item():.4f}, Acc: {100.*correct/total:.2f}%"
+                    f"Loss: {loss.item():.4f}, F1: {f1:.4f}"
                 )
 
         epoch_loss = running_loss / num_batches
-        epoch_acc = 100.0 * correct / total
-        return epoch_loss, epoch_acc
+        precision = total_tp / (total_tp + total_fp + 1e-8)
+        recall = total_tp / (total_tp + total_fn + 1e-8)
+        epoch_f1 = 2 * precision * recall / (precision + recall + 1e-8)
+        return epoch_loss, epoch_f1
 
-    def validate_epoch(self):
-        """Validate for one epoch.
+    # VHR10 class names (0-indexed)
+    CLASS_NAMES = [
+        "airplane",
+        "ship",
+        "storage_tank",
+        "baseball_diamond",
+        "tennis_court",
+        "basketball_court",
+        "ground_track_field",
+        "harbor",
+        "bridge",
+        "vehicle",
+    ]
+
+    def validate_epoch(self, threshold: float = 0.3):
+        """Validate for one epoch with multi-label classification.
 
         Also uses explicit separation of backbone and classifier for consistency.
-        Accuracy: Prediction is correct if it matches ANY label in the image
+        Metrics: F1 score (micro-averaged for proper distributed aggregation)
+        Also reports per-class precision, recall, and F1.
 
         In distributed mode, aggregates metrics across all ranks for accurate validation.
         """
         self.model.eval()
         running_loss = 0.0
-        correct = 0
-        total = 0
+        num_classes = len(self.CLASS_NAMES)
+
+        # Per-class metrics
+        class_tp = torch.zeros(num_classes, device=self.device)
+        class_fp = torch.zeros(num_classes, device=self.device)
+        class_fn = torch.zeros(num_classes, device=self.device)
 
         with torch.no_grad():
             for batch in self.val_loader:
                 images = batch["image"].to(self.device)
                 labels = batch["label"].to(self.device)
-                all_labels = batch["all_labels"]
 
-                # Explicitly separate backbone and classifier
                 model = self.model.module if isinstance(self.model, DDP) else self.model
                 embeddings = model.get_features(images)
                 outputs = model.classifier(embeddings)
 
                 loss = self.criterion(outputs, labels)
-
                 running_loss += loss.item()
-                _, predicted = outputs.max(1)
-                total += labels.size(0)
 
-                # Accuracy: check if prediction is in any of the labels for each image
-                for i, pred in enumerate(predicted):
-                    if pred.item() in all_labels[i]:
-                        correct += 1
+                preds = torch.sigmoid(outputs) > threshold
+                targets = labels.bool()
+
+                class_tp += (preds & targets).sum(dim=0).float()
+                class_fp += (preds & ~targets).sum(dim=0).float()
+                class_fn += (~preds & targets).sum(dim=0).float()
 
         if self.world_size > 1:
-            metrics = torch.tensor(
-                [running_loss, correct, total], dtype=torch.float32, device=self.device
+            # Aggregate per-class metrics
+            torch.distributed.all_reduce(class_tp, op=torch.distributed.ReduceOp.SUM)
+            torch.distributed.all_reduce(class_fp, op=torch.distributed.ReduceOp.SUM)
+            torch.distributed.all_reduce(class_fn, op=torch.distributed.ReduceOp.SUM)
+            running_loss_tensor = torch.tensor([running_loss], device=self.device)
+            torch.distributed.all_reduce(
+                running_loss_tensor, op=torch.distributed.ReduceOp.SUM
             )
-            torch.distributed.all_reduce(metrics, op=torch.distributed.ReduceOp.SUM)
-            running_loss, correct, total = metrics.tolist()
+            running_loss = running_loss_tensor.item()
             total_batches = len(self.val_loader) * self.world_size
             val_loss = running_loss / total_batches
         else:
             val_loss = running_loss / len(self.val_loader)
 
-        val_acc = 100.0 * correct / total
+        # Compute overall metrics (micro-averaged)
+        total_tp = class_tp.sum().item()
+        total_fp = class_fp.sum().item()
+        total_fn = class_fn.sum().item()
+        precision = total_tp / (total_tp + total_fp + 1e-8)
+        recall = total_tp / (total_tp + total_fn + 1e-8)
+        val_f1 = 2 * precision * recall / (precision + recall + 1e-8)
 
         if self.rank == 0:
             print(
-                f"Validation Loss: {val_loss:.4f}, Acc: {val_acc:.2f}% (aggregated across {self.world_size} rank{'s' if self.world_size > 1 else ''})"
+                f"Validation Loss: {val_loss:.4f}, F1: {val_f1:.4f}, Precision: {precision:.4f}, Recall: {recall:.4f} "
+                f"(aggregated across {self.world_size} rank{'s' if self.world_size > 1 else ''})"
             )
 
-        return val_loss, val_acc
+            # Per-class metrics
+            print("\nPer-class metrics:")
+            print(
+                f"{'Class':<20} {'Precision':>10} {'Recall':>10} {'F1':>10} {'Support':>10}"
+            )
+            print("-" * 62)
+            for i, name in enumerate(self.CLASS_NAMES):
+                tp, fp, fn = class_tp[i].item(), class_fp[i].item(), class_fn[i].item()
+                p = tp / (tp + fp + 1e-8)
+                r = tp / (tp + fn + 1e-8)
+                f1 = 2 * p * r / (p + r + 1e-8)
+                support = int(tp + fn)  # Total actual positives for this class
+                print(f"{name:<20} {p:>10.4f} {r:>10.4f} {f1:>10.4f} {support:>10}")
+            print("-" * 62)
+        return val_loss, val_f1
 
-    def train(
+    def setup(
         self,
-        num_epochs: int,
-        batch_size: int = 32,
         lr: float = 1e-4,
-        model_name: str = "vitl16",
         freeze_backbone: bool = True,
-        num_classes: int = 11,  # VHR10 has labels 1-10, so need 11 classes (0-10)
+        model_name: str = "vitl16",
+        num_classes: int = 10,  # VHR10 has 10 classes, labels converted to 0-indexed (0-9)
     ):
         # Initialize distributed communications
         self.init_comms()
@@ -576,10 +618,6 @@ class VHR10Trainer:
         )
         print("Model initialized")
 
-        # Load data
-        self.load_data(batch_size=batch_size)
-        print("Data loaded")
-
         # Setup learning rate scheduler - reduces LR when validation plateaus
         self.scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(
             self.optimizer,
@@ -588,6 +626,13 @@ class VHR10Trainer:
             patience=3,
         )
 
+        self.model_name = model_name
+
+    def train(
+        self,
+        num_epochs: int,
+        threshold: float,
+    ):
         # Training loop
         for epoch in range(num_epochs):
             # Set epoch for distributed sampler
@@ -596,29 +641,29 @@ class VHR10Trainer:
 
             print(f"Starting epoch {epoch+1}/{num_epochs}")
 
-            train_loss, train_acc = self.train_epoch(epoch)
+            train_loss, train_f1 = self.train_epoch(epoch, threshold)
             print("Trained epoch")
 
-            val_loss, val_acc = self.validate_epoch()
+            val_loss, val_f1 = self.validate_epoch(threshold)
             print("Validated epoch")
 
-            # Step scheduler based on validation accuracy
-            self.scheduler.step(val_acc)
+            # Step scheduler based on validation F1
+            self.scheduler.step(val_f1)
 
             # Save best model (only on rank 0)
-            if self.rank == 0 and val_acc > self.best_acc:
-                self.best_acc = val_acc
+            if self.rank == 0 and val_f1 > self.best_acc:
+                self.best_acc = val_f1
                 self.save_checkpoint(
-                    f"vhr10_dinov3_{model_name}_best.pth", epoch, val_acc
+                    f"vhr10_dinov3_{self.model_name}_best.pth", epoch, val_f1
                 )
 
             print(
                 f"Rank {self.rank}: Epoch {epoch+1}/{num_epochs} - "
-                f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.2f}%, "
-                f"Val Loss: {val_loss:.4f}, Val Acc: {val_acc:.2f}%"
+                f"Train Loss: {train_loss:.4f}, Train F1: {train_f1:.4f}, "
+                f"Val Loss: {val_loss:.4f}, Val F1: {val_f1:.4f}"
             )
 
-        print(f"Training complete! Best accuracy: {self.best_acc:.2f}%")
+        print(f"Training complete! Best F1: {self.best_acc:.4f}")
 
     def save_checkpoint(self, filename: str, epoch: int, val_acc: float):
         """Save classifier head checkpoint (backbone is frozen, no need to save it)."""
@@ -742,8 +787,10 @@ class VHR10Trainer:
 # - We create an instance of the trainer class on remote, which is now running distributed
 # - Multiple methods can be called on the remote trainer instance
 def main():
+    start_time = time.time()
+
     parser = argparse.ArgumentParser(description="VHR10 Classification with DINOv3")
-    parser.add_argument("--epochs", type=int, default=20, help="number of epochs")
+    parser.add_argument("--epochs", type=int, default=3, help="number of epochs")
     parser.add_argument("--batch-size", type=int, default=32, help="batch size")
     parser.add_argument("--lr", type=float, default=1e-4, help="learning rate")
     parser.add_argument(
@@ -769,21 +816,29 @@ def main():
         help="freeze backbone weights",
     )
     parser.add_argument(
-        "--workers", type=int, default=2, help="number of distributed workers"
+        "--workers", type=int, default=3, help="number of distributed workers"
     )
     parser.add_argument(
         "--num-classes",
         type=int,
-        default=11,
-        help="number of classes (VHR10 uses 11 for labels 1-10)",
+        default=10,
+        help="number of classes (VHR10 uses labels 1-10)",
+    )
+    parser.add_argument(
+        "--threshold",
+        type=float,
+        default=0.3,
+        help="probability to use for binary classification",
     )
 
     args = parser.parse_args()
 
     # Define compute configuration
-    img = kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
+    img = kt.Image(
+        image_id="pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime"
+    ).pip_install(
         [
-            "torchgeo",
+            "torchgeo[datasets,models]",
             "transformers",
             "torchvision",
             "pillow",
@@ -807,17 +862,32 @@ def main():
 
     # Dispatch trainer class to remote GPUs
     remote_trainer = kt.cls(VHR10Trainer).to(gpu_compute, init_args=init_args)
+    print("Time to first activity:", time.time() - start_time)
 
     # Run distributed training
-    print("Starting distributed training...")
-    remote_trainer.train(
-        num_epochs=args.epochs,
-        batch_size=args.batch_size,
+    remote_trainer.setup(
         lr=args.lr,
-        model_name=args.model_name,
         freeze_backbone=args.freeze_backbone,
+        model_name=args.model_name,
         num_classes=args.num_classes,
     )
+    print(
+        "Time to setup:", time.time() - start_time
+    )  # 16.46 on 2nd run, 39.29 from cached image, 274 seconds on first run, cold start on image too
+
+    data_start = time.time()
+    remote_trainer.load_data(args.batch_size, num_workers=0)
+    print(
+        "Time to load data:", time.time() - data_start
+    )  # 1.6794 seconds on 2nd run, 5.88 seconds on 1st run
+    print(
+        "Time to start training:", time.time() - start_time
+    )  # 18.14 seconds on 2nd+ run, 55 on a warm node, 280 seconds on 1st run
+
+    remote_trainer.train(num_epochs=args.epochs, threshold=args.threshold)
+    print(
+        "Training complete, total time:", time.time() - start_time
+    )  # 58 seconds for 2nd+ time, 96 seconds on a first image warm run, 429s on first run (cold)
 
 
 if __name__ == "__main__":
