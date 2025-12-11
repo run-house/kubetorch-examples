@@ -1,18 +1,35 @@
+# # Kubeflow Trainer + Kubetorch
+# In this example, we show how to use the Kubetorch `from_manifest()` to
+# launch TrainJob / PyTorchJob CRD based distributed training workloads.
+# You can interactively override the base manifest with Kubetorch as well
+# for easy iteration over a base configuration.
+#
+# With Kubetorch, you get a significantly better interface into compute
+# and development experience.
+# * Instantly redeploy local code changes, without having to rebuild Docker images
+# * Persisting the environment across iteration loops, without having to reload data
+# or artifacts or re-pip install any libraries.
+# * No need to requeue for resources
+# * Directly run inference and evaluations after model completes on the same service
+# without having to deploy it separately
+# * Allow for multi-threaded parallel calls into the same deployed training class
+
 import argparse
 import os
 import time
 
 import kubetorch as kt
 
+# We import the underlying trainer class, which is a regular Python class with methods
+# like train(), load_data(), predict(), etc.
 from vhr10_dinov3_classifier import VHR10Trainer
 
+# A toy example of a PyTorchJob + TrainJob manifest, hardcoded for convenience
 container = {
-    "name": "pytorch-container",
+    "name": "kubetorch",
     "image": "pytorch/pytorch:latest",
     "resources": {
         "requests": {
-            "cpu": "0.5",
-            "memory": "1Gi",
             "nvidia.com/gpu": 1,
         },
         "limits": {
@@ -41,6 +58,21 @@ PYTORCHJOB_MANIFEST = {
                 "template": {"spec": {"containers": [container]}},
             },
         },
+    },
+}
+
+
+TRAINJOB_MANIFEST = {
+    "apiVersion": "trainer.kubeflow.org/v1alpha1",
+    "kind": "TrainJob",
+    "metadata": {
+        "name": "",
+        "namespace": "default",
+    },
+    "spec": {
+        "runtimeRef": {"name": "torch-distributed"},
+        "trainer": {"numNodes": 3},
+        "template": {"spec": {"containers": [container]}},
     },
 }
 
@@ -92,12 +124,13 @@ def main():
 
     args = parser.parse_args()
 
-    # Set worker replicas (total = 1 Master + N-1 Workers)
+    # Override worker replicas based on passed args
     PYTORCHJOB_MANIFEST["spec"]["pytorchReplicaSpecs"]["Worker"]["replicas"] = (
         args.workers - 1
     )
+    TRAINJOB_MANIFEST["spec"]["trainer"]["numNodes"] = args.workers
 
-    # Define image with dependencies
+    # Define image with dependencies, which overrides the base container
     img = (
         kt.Image(image_id="pytorch/pytorch:2.7.1-cuda12.8-cudnn9-runtime")
         .pip_install(
@@ -106,33 +139,30 @@ def main():
                 "transformers",
                 "torchvision",
                 "pillow",
-                "soxr",  # Required by transformers for audio_utils
+                "soxr",
             ]
         )
         .set_env_vars({"HF_TOKEN": os.environ["HF_TOKEN"]})
     )
 
-    # Create compute from PyTorchJob manifest
-    gpu_compute = kt.Compute.from_manifest(PYTORCHJOB_MANIFEST)
+    # Create compute from PyTorchJob manifest, and then update with fields for Kubetorch
+    gpu_compute = kt.Compute.from_manifest(TRAINJOB_MANIFEST)
     gpu_compute.gpus = 1
     gpu_compute.image = img
     gpu_compute.launch_timeout = 600
     gpu_compute.inactivity_ttl = "2h"
     gpu_compute.distributed_config = {"quorum_workers": args.workers}
 
-    # Initialize trainer arguments
+    # Dispatch trainer class to remote compute, launching as TrainJob/PTJ
     init_args = dict(
         data_root=args.data_root,
         checkpoint_dir=args.checkpoint_dir,
     )
 
-    # Dispatch trainer class to remote GPUs
-    remote_trainer = kt.cls(VHR10Trainer).to(
-        gpu_compute, init_args=init_args, stream_logs=True
-    )
+    remote_trainer = kt.cls(VHR10Trainer).to(gpu_compute, init_args=init_args)
     print("Time to first activity:", time.time() - start_time)
 
-    # Run distributed training
+    # Run distributed training, calling methods on remote
     remote_trainer.setup(
         lr=args.lr,
         freeze_backbone=args.freeze_backbone,
@@ -141,15 +171,13 @@ def main():
     )
     print("Time to setup:", time.time() - start_time)
 
-    data_start = time.time()
-    remote_trainer.load_data(args.batch_size)
-    print("Time to load data:", time.time() - data_start)
-    print("Time to start training:", time.time() - start_time)  # 19 seconds after warm
+    remote_trainer.load_data(args.batch_size, num_workers=0)
+    print(
+        "Time to start training:", time.time() - start_time
+    )  # 19 seconds after up, 50 seconds from warm node
 
     remote_trainer.train(num_epochs=args.epochs, threshold=args.threshold)
-    print(
-        "Training complete, total time:", time.time() - start_time
-    )  # 160 s after first run
+    print("Training complete, total time:", time.time() - start_time)
 
 
 if __name__ == "__main__":
