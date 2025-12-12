@@ -1,2 +1,0 @@
-# We need this here because the train service in gsm8k redeploys the inference service,
-# so we want a well-bounded working dir

@@ -1,0 +1,136 @@
+import re
+from dataclasses import dataclass
+from typing import List, Optional
+
+
+@dataclass
+class RolloutBatch:
+    """Result of a single rollout batch."""
+
+    step: int
+    prompts: List[str]
+    completions: List[str]
+    token_ids: List[List[int]]
+    rewards: List[float]
+
+
+class SimpleMathAgent:
+    """Math problem solver using vLLM."""
+
+    def __init__(self, inference_service, config: dict, checkpoint_version=0):
+        self.inference_service = inference_service
+        self.checkpoint_version = checkpoint_version
+        self.config = config
+        self.system_prompt = (
+            "You are a helpful math assistant. "
+            "Solve the following problem step by step. "
+            "End with '#### <answer>' where <answer> is just the number."
+        )
+
+    def _compute_rewards(self, completions, answers):
+        rewards_config = self.config.get("rewards", {})
+        correct_reward = rewards_config.get("correct", 1.0)
+        incorrect_reward = rewards_config.get("incorrect", -0.2)
+
+        rewards = []
+        for completion, true_answer in zip(completions, answers):
+            match = re.search(r"####\s*([-+]?\d*\.?\d+)", completion)
+            pred_answer = match.group(1).strip() if match else None
+
+            true_match = re.search(r"####\s*([-+]?\d*\.?\d+)", true_answer)
+            true_value = (
+                true_match.group(1).strip() if true_match else true_answer.strip()
+            )
+
+            reward = correct_reward if pred_answer == true_value else incorrect_reward
+            rewards.append(reward)
+        return rewards
+
+    async def generate_rollouts(
+        self, questions, answers, num_generations=4, step=None
+    ) -> Optional[RolloutBatch]:
+        """Generate rollouts and compute rewards."""
+        expanded_questions = [q for q in questions for _ in range(num_generations)]
+        expanded_answers = [a for a in answers for _ in range(num_generations)]
+
+        prompts = [
+            f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:"
+            for q in expanded_questions
+        ]
+
+        gen_config = self.config.get("generation", {})
+        completions, token_ids = await self.inference_service.generate(
+            prompts,
+            request_version=self.checkpoint_version,
+            max_tokens=gen_config.get("max_tokens", 512),
+            temperature=gen_config.get("temperature", 0.7),
+            top_p=gen_config.get("top_p", 0.95),
+        )
+
+        if all(c == "" for c in completions):
+            return None
+
+        rewards = self._compute_rewards(completions, expanded_answers)
+
+        return RolloutBatch(
+            step=step,
+            prompts=prompts,
+            completions=completions,
+            token_ids=token_ids,
+            rewards=rewards,
+        )
+
+    async def evaluate_accuracy(
+        self, test_questions, test_answers, num_samples=100, step=None
+    ):
+        """Evaluate model accuracy on test dataset."""
+        print(f"[EVAL] Starting evaluation on {num_samples} test samples")
+
+        eval_questions = test_questions[:num_samples]
+        eval_answers = test_answers[:num_samples]
+
+        prompts = [
+            f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:"
+            for q in eval_questions
+        ]
+
+        gen_config = self.config.get("generation", {})
+        completions, _ = await self.inference_service.generate(
+            prompts,
+            request_version=self.checkpoint_version,
+            max_tokens=gen_config.get("max_tokens", 512),
+            temperature=0.1,  # Lower temperature for deterministic evaluation
+            top_p=0.95,
+        )
+
+        if all(c == "" for c in completions):
+            print(
+                f"[EVAL] Request was stale (version {self.checkpoint_version}), skipping evaluation"
+            )
+            return None
+
+        correct = 0
+        total = len(eval_questions)
+
+        for i, (completion, true_answer) in enumerate(zip(completions, eval_answers)):
+            match = re.search(r"####\s*([-+]?\d*\.?\d+)", completion)
+            pred_answer = match.group(1).strip() if match else None
+
+            true_match = re.search(r"####\s*([-+]?\d*\.?\d+)", true_answer)
+            true_value = (
+                true_match.group(1).strip() if true_match else true_answer.strip()
+            )
+
+            is_correct = pred_answer == true_value
+            if is_correct:
+                correct += 1
+
+            if i < 3:
+                print(
+                    f"[EVAL] Example {i+1}: Predicted: {pred_answer}, True: {true_value}, Correct: {is_correct}"
+                )
+
+        accuracy = correct / total
+        print(f"[EVAL] Accuracy: {correct}/{total} = {accuracy:.3f}")
+
+        return {"accuracy": accuracy, "correct": correct, "total": total, "step": step}
