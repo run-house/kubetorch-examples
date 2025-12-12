@@ -1,0 +1,41 @@
+# Model configuration
+model:
+  id: "Qwen/Qwen2.5-0.5B-Instruct"
+
+# Inference engine configuration (AsyncEngineArgs)
+inference_engine:
+  dtype: "bfloat16"
+  trust_remote_code: true
+  gpu_memory_utilization: 0.9
+  max_model_len: 1024
+  enforce_eager: false
+  enable_lora: true
+  max_lora_rank: 16
+
+# Training configuration
+training:
+  num_epochs: 5
+  batch_size: 64
+  num_generations: 4
+  checkpoint_interval: 4
+  eval_interval: 5
+  eval_samples: 100
+  num_workers: 4
+
+# Trainer configuration (LoRA and optimizer)
+trainer:
+  learning_rate: 1.0e-5
+  lora_r: 16
+  lora_alpha: 32
+  lora_dropout: 0.1
+
+# Generation configuration
+generation:
+  max_tokens: 512
+  temperature: 0.7
+  top_p: 0.95
+
+# Reward configuration
+rewards:
+  correct: 1.0
+  incorrect: -0.2
