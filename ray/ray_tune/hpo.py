@@ -73,9 +73,9 @@ def ray_tune_hpo(num_samples=4, max_concurrent_trials=2):
 # to the remote function call. You must have Kuberay installed on your cluster, the installation
 # instructions with Kubetorch [are here](https://www.run.house/kubetorch/installation#ray-support-optional).
 def find_minimum():
-    ray_compute = kt.Compute(
-        cpus="2", memory="3Gi", image=kt.Image(image_id="rayproject/ray")
-    ).distribute("ray", workers=2)
+    ray_compute = kt.Compute(cpus="2", memory="3Gi", image=kt.Image(image_id="rayproject/ray")).distribute(
+        "ray", workers=2
+    )
 
     remote_fn = kt.fn(ray_tune_hpo).to(ray_compute)
 

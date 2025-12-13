@@ -79,9 +79,7 @@ class ResNet152LitModule(L.LightningModule):
             lr=self.hparams.lr,
             weight_decay=self.hparams.weight_decay,
         )
-        scheduler = optim.lr_scheduler.StepLR(
-            optimizer, step_size=self.hparams.step_size, gamma=self.hparams.gamma
-        )
+        scheduler = optim.lr_scheduler.StepLR(optimizer, step_size=self.hparams.step_size, gamma=self.hparams.gamma)
         return [optimizer], [scheduler]
 
     def save_weights_to_s3(self, s3_bucket, s3_key):
@@ -109,12 +107,8 @@ class ImageNetDataModule(L.LightningDataModule):
     def setup(self, stage=None):
         if stage == "fit" or stage is None:
             if self.download_data:
-                subprocess.run(
-                    f"aws s3 sync {self.train_data_path} ~/train_dataset", shell=True
-                )
-                subprocess.run(
-                    f"aws s3 sync {self.val_data_path} ~/val_dataset", shell=True
-                )
+                subprocess.run(f"aws s3 sync {self.train_data_path} ~/train_dataset", shell=True)
+                subprocess.run(f"aws s3 sync {self.val_data_path} ~/val_dataset", shell=True)
 
             self.train_dataset = load_from_disk("~/train_dataset").with_format("torch")
 
@@ -122,15 +116,11 @@ class ImageNetDataModule(L.LightningDataModule):
 
     def train_dataloader(self):
         sampler = DistributedSampler(self.train_dataset)
-        return DataLoader(
-            self.train_dataset, batch_size=self.batch_size, sampler=sampler
-        )
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, sampler=sampler)
 
     def val_dataloader(self):
         sampler = DistributedSampler(self.train_dataset)
-        return DataLoader(
-            self.train_dataset, batch_size=self.batch_size, sampler=sampler
-        )
+        return DataLoader(self.train_dataset, batch_size=self.batch_size, sampler=sampler)
 
 
 # ## Encapsulation of Training
@@ -151,9 +141,7 @@ class ResNetTrainer:
         self.lit_module = None
         self.trainer = None
 
-    def load_data(
-        self, train_data_path, val_data_path, batch_size=32, download_data=True
-    ):
+    def load_data(self, train_data_path, val_data_path, batch_size=32, download_data=True):
         self.data_module = ImageNetDataModule(
             train_data_path=train_data_path,
             val_data_path=val_data_path,
@@ -191,17 +179,11 @@ class ResNetTrainer:
 
     def fit(self):
         if self.train_loader is None and self.data_module is None:
-            raise ValueError(
-                "Data module not loaded. Please call load_data() before calling fit()."
-            )
+            raise ValueError("Data module not loaded. Please call load_data() before calling fit().")
         if self.lit_module is None:
-            raise ValueError(
-                "Lightning module not loaded. PLease call load_model() before calling fit()."
-            )
+            raise ValueError("Lightning module not loaded. PLease call load_model() before calling fit().")
         if self.trainer is None:
-            raise ValueError(
-                "Trainer not loaded. Please call load_trainer() before calling fit()."
-            )
+            raise ValueError("Trainer not loaded. Please call load_trainer() before calling fit().")
 
         import torch.distributed as dist
 
@@ -213,9 +195,7 @@ class ResNetTrainer:
 
     def save(self):
         if self.lit_module is None:
-            raise ValueError(
-                "Lightning module not loaded. Please call load_model() before calling save()."
-            )
+            raise ValueError("Lightning module not loaded. Please call load_model() before calling save().")
 
         self.lit_module.save_weights_to_s3(self.working_s3_bucket, self.working_s3_path)
 
@@ -248,9 +228,7 @@ if __name__ == "__main__":
             "lightning",
         ]
     )
-    gpus = kt.Compute(gpus="1", secrets=["aws"], image=img).distribute(
-        "pytorch", workers=2
-    )
+    gpus = kt.Compute(gpus="1", secrets=["aws"], image=img).distribute("pytorch", workers=2)
 
     # Now that the compute is up, we will send our trainer to the remote compute, instantiate a remote instance of it, and run the training.
     # calling methods on the remote instance as if it were local.

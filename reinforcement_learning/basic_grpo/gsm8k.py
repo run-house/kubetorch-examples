@@ -51,9 +51,7 @@ class vLLM:
         import subprocess
 
         try:
-            result = subprocess.run(
-                ["nvidia-smi"], capture_output=True, text=True, check=True
-            )
+            result = subprocess.run(["nvidia-smi"], capture_output=True, text=True, check=True)
             for line in result.stdout.split("\n"):
                 if "python" in line.lower() and "C" in line:
                     elems = line.split()
@@ -87,12 +85,8 @@ class vLLM:
 
         print(f"Generating response with model_id: {self.model_id}")
         all_outputs = self.model.generate(queries, sampling_params)
-        completions = [
-            output.text for outputs in all_outputs for output in outputs.outputs
-        ]
-        token_ids = [
-            output.token_ids for outputs in all_outputs for output in outputs.outputs
-        ]
+        completions = [output.text for outputs in all_outputs for output in outputs.outputs]
+        token_ids = [output.token_ids for outputs in all_outputs for output in outputs.outputs]
         return completions, token_ids
 
 
@@ -110,13 +104,9 @@ class MathAgent:
             "Do not include any units or the word answer in your response."
         )
 
-    async def answer(
-        self, questions: List[str], temperature=0.7, max_tokens=512, top_p=0.95
-    ):
+    async def answer(self, questions: List[str], temperature=0.7, max_tokens=512, top_p=0.95):
         """Generate answers for a batch of questions."""
-        prompts = [
-            f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:" for q in questions
-        ]
+        prompts = [f"{self.system_prompt}\n\nQuestion: {q}\n\nSolution:" for q in questions]
         # Since inference_service.async_ is True, generate returns a coroutine
         completions, token_ids = await self.inference_service.generate(
             prompts, max_tokens=max_tokens, temperature=temperature, top_p=top_p
@@ -131,9 +121,7 @@ class MathAgent:
             return match.group(1).strip()
         return None
 
-    def calculate_rewards(
-        self, questions: List[str], completions: List[str], true_answers: List[str]
-    ) -> List[float]:
+    def calculate_rewards(self, questions: List[str], completions: List[str], true_answers: List[str]) -> List[float]:
         """Calculate rewards for completions based on correctness."""
         rewards = []
 
@@ -210,9 +198,7 @@ class GRPOTrainer:
         # Enable gradient checkpointing to save memory
         self.model.gradient_checkpointing_enable()
 
-        self.tokenizer = AutoTokenizer.from_pretrained(
-            self.model_id, trust_remote_code=True
-        )
+        self.tokenizer = AutoTokenizer.from_pretrained(self.model_id, trust_remote_code=True)
 
         if self.tokenizer.pad_token is None:
             self.tokenizer.pad_token = self.tokenizer.eos_token
@@ -226,9 +212,7 @@ class GRPOTrainer:
         # Wrap model with DDP
         from torch.nn.parallel import DistributedDataParallel as DDP
 
-        self.model = DDP(
-            self.model, device_ids=[self.device], find_unused_parameters=False
-        )
+        self.model = DDP(self.model, device_ids=[self.device], find_unused_parameters=False)
         print(f"Distributed training initialized on {self.device}")
 
         self.optimizer = torch.optim.AdamW(
@@ -256,9 +240,7 @@ class GRPOTrainer:
         logits = outputs.logits
 
         # Shift for next-token prediction
-        logits = logits[
-            :, prompt_ids.size(1) - 1 : -1, :
-        ]  # Get logits for completion tokens
+        logits = logits[:, prompt_ids.size(1) - 1 : -1, :]  # Get logits for completion tokens
 
         # Compute cross-entropy loss per token
         # Reshape for cross entropy
@@ -267,9 +249,7 @@ class GRPOTrainer:
         flat_targets = completion_ids.reshape(-1)
 
         # Compute per-token loss (not reduced)
-        token_losses = F.cross_entropy(
-            flat_logits, flat_targets, reduction="none"
-        ).reshape(completion_ids.shape)
+        token_losses = F.cross_entropy(flat_logits, flat_targets, reduction="none").reshape(completion_ids.shape)
 
         # Apply mask
         masked_losses = token_losses * completion_mask
@@ -279,9 +259,7 @@ class GRPOTrainer:
         token_advantages = advantages.unsqueeze(-1).expand_as(masked_losses)
 
         # Token-weighted loss (DrGRPO)
-        weighted_token_loss = (
-            masked_losses * token_advantages * completion_mask
-        ).sum() / completion_mask.sum()
+        weighted_token_loss = (masked_losses * token_advantages * completion_mask).sum() / completion_mask.sum()
 
         # Also compute standard sequence-level loss for comparison
         sequence_loss = masked_losses.sum(dim=1).mean()
@@ -324,9 +302,7 @@ class GRPOTrainer:
         advantages_tensor = advantages.view(-1).to(self.device)
 
         # Pad completion_ids
-        max_len = min(
-            max(len(ids) for ids in completion_ids), 512
-        )  # Limit completion length
+        max_len = min(max(len(ids) for ids in completion_ids), 512)  # Limit completion length
         padded_completion_ids = []
         completion_masks = []
 
@@ -336,12 +312,8 @@ class GRPOTrainer:
             padded_completion_ids.append(padded)
             completion_masks.append(mask)
 
-        completion_ids_tensor = torch.tensor(
-            padded_completion_ids, dtype=torch.long
-        ).to(self.device)
-        completion_mask_tensor = torch.tensor(completion_masks, dtype=torch.float).to(
-            self.device
-        )
+        completion_ids_tensor = torch.tensor(padded_completion_ids, dtype=torch.long).to(self.device)
+        completion_mask_tensor = torch.tensor(completion_masks, dtype=torch.float).to(self.device)
         rewards_tensor = torch.tensor(rewards, dtype=torch.float).to(self.device)
 
         # Process in microbatches to save memory
@@ -398,9 +370,7 @@ class GRPOTrainer:
         checkpoint_path = Path(f"qwen-grpo-checkpoint-{self.steps}-steps")
 
         # Get the underlying model (unwrap DDP if needed)
-        model_to_save = (
-            self.model.module if hasattr(self.model, "module") else self.model
-        )
+        model_to_save = self.model.module if hasattr(self.model, "module") else self.model
 
         model_to_save.save_pretrained(checkpoint_path.resolve())
         self.tokenizer.save_pretrained(checkpoint_path.resolve())
@@ -419,9 +389,7 @@ class GRPOTrainer:
         # the AsyncGRPOPipeline.
         inference_service.compute.image.rsync(source=self.latest_checkpoint, dest="./")
 
-        print(
-            f"Redeploying inference service with checkpoint: {self.latest_checkpoint}"
-        )
+        print(f"Redeploying inference service with checkpoint: {self.latest_checkpoint}")
         init_args = {"model_id": self.latest_checkpoint}
         service = inference_service.to(inference_service.compute, init_args=init_args)
         service.generate(["Test"], max_tokens=10)  # Warm up the service
@@ -478,9 +446,7 @@ class SyncGRPOPipeline:
                 )
 
                 # Calculate rewards
-                rewards = self.agent.calculate_rewards(
-                    expanded_prompts, completions, expanded_answers
-                )
+                rewards = self.agent.calculate_rewards(expanded_prompts, completions, expanded_answers)
 
                 # Log first batch examples
                 if num_batches_processed == 0:
@@ -519,9 +485,7 @@ class SyncGRPOPipeline:
         if num_batches_processed > 0:
             avg_loss = total_loss / num_batches_processed
             avg_reward = total_reward / num_batches_processed
-            print(
-                f"Epoch complete: Avg Loss={avg_loss:.4f}, Avg Reward={avg_reward:.4f}"
-            )
+            print(f"Epoch complete: Avg Loss={avg_loss:.4f}, Avg Reward={avg_reward:.4f}")
 
         return {
             "avg_loss": avg_loss,
@@ -606,9 +570,7 @@ async def main():
         print(f"\n=== Epoch {epoch + 1}/{num_epochs} ===")
 
         # Train for one epoch
-        epoch_metrics = await pipeline.train_epoch(
-            dataset, num_batches=batches_per_epoch
-        )
+        epoch_metrics = await pipeline.train_epoch(dataset, num_batches=batches_per_epoch)
 
         # Save and redeploy checkpoint after each epoch
         if epoch_metrics["num_batches"] > 0:

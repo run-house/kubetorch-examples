@@ -141,18 +141,12 @@ class Embedder:
         texts = [text] if isinstance(text, str) else text
 
         # Tokenize the input texts with padding and truncation
-        inputs = self.tokenizer(
-            texts, padding=True, truncation=True, max_length=512, return_tensors="pt"
-        )
+        inputs = self.tokenizer(texts, padding=True, truncation=True, max_length=512, return_tensors="pt")
 
         # Convert PyTorch tensors to numpy arrays for Triton
         input_ids = inputs["input_ids"].numpy().astype(np.int64)
         attention_mask = inputs["attention_mask"].numpy().astype(np.int64)
-        token_type_ids = (
-            inputs.get("token_type_ids", np.zeros_like(input_ids))
-            .numpy()
-            .astype(np.int64)
-        )
+        token_type_ids = inputs.get("token_type_ids", np.zeros_like(input_ids)).numpy().astype(np.int64)
 
         # Prepare inputs for Triton client
         triton_inputs = [
@@ -170,9 +164,7 @@ class Embedder:
         triton_outputs = [grpcclient.InferRequestedOutput("last_hidden_state")]
 
         # Run inference using gRPC client
-        response = self.client.infer(
-            "embedding_model", triton_inputs, outputs=triton_outputs
-        )
+        response = self.client.infer("embedding_model", triton_inputs, outputs=triton_outputs)
 
         # Get output data as numpy array
         embeddings = response.as_numpy("last_hidden_state")
@@ -185,9 +177,7 @@ class Embedder:
         attention_mask_expanded = attention_mask.reshape(batch_size, sequence_length, 1)
 
         # Apply weighted mean pooling: sum(embeddings * attention_mask) / sum(attention_mask)
-        embeddings = (embeddings * attention_mask_expanded).sum(
-            axis=1
-        ) / attention_mask_expanded.sum(axis=1)
+        embeddings = (embeddings * attention_mask_expanded).sum(axis=1) / attention_mask_expanded.sum(axis=1)
 
         # Optional L2 normalization for cosine similarity calculations
         if embed_kwargs.get("normalize_embeddings", False):

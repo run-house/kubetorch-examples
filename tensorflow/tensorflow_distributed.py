@@ -34,20 +34,16 @@ def train_process():
     with strategy.scope():
         model.compile(optimizer=optimizer, loss="mse")
 
-    model.fit(
-        tf.data.Dataset.from_tensor_slices(
-            (tf.random.normal([1000, 10]), tf.random.normal([1000, 1]))
-        ).batch(32)
-    )
+    model.fit(tf.data.Dataset.from_tensor_slices((tf.random.normal([1000, 10]), tf.random.normal([1000, 1]))).batch(32))
 
     print(f"Worker {tf_config['task']['index']} finished")
 
 
 if __name__ == "__main__":
     # Dispatch the training function to a multi-node cluster with 4 nodes, each with 1 GPU
-    gpus = kt.Compute(
-        gpus="1", image=kt.Image(image_id="nvcr.io/nvidia/tensorflow:25.02-tf2-py3")
-    ).distribute("tensorflow", workers=4)
+    gpus = kt.Compute(gpus="1", image=kt.Image(image_id="nvcr.io/nvidia/tensorflow:25.02-tf2-py3")).distribute(
+        "tensorflow", workers=4
+    )
     remote_train = kt.fn(train_process).to(gpus)
 
     remote_train()

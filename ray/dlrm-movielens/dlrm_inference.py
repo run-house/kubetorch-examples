@@ -4,9 +4,7 @@ from dlrm_training import DLRM, read_preprocessed_dlrm
 
 # DLRM model class for inference as required by Ray Data, that reads the model from S3
 class DLRMInferenceModel:
-    def __init__(
-        self, unique_users, unique_movies, embeddings_dim, model_s3_bucket, model_s3_key
-    ):
+    def __init__(self, unique_users, unique_movies, embeddings_dim, model_s3_bucket, model_s3_key):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
         self.model = DLRM(
@@ -32,16 +30,12 @@ class DLRMInferenceModel:
 
 
 # Function that is sent to compute to be called and do the inference
-def inference_dlrm(
-    num_gpus, num_nodes, model_s3_bucket, model_s3_key, dataset_s3_path, write_s3_path
-):
+def inference_dlrm(num_gpus, num_nodes, model_s3_bucket, model_s3_key, dataset_s3_path, write_s3_path):
     unique_users = 330975  # cheating here by hard coding
     unique_movies = 86000
     embeddings_dim = 64
 
-    dlrm_model = DLRMInferenceModel(
-        unique_users, unique_movies, embeddings_dim, model_s3_bucket, model_s3_key
-    )
+    dlrm_model = DLRMInferenceModel(unique_users, unique_movies, embeddings_dim, model_s3_bucket, model_s3_key)
 
     ds = read_preprocessed_dlrm(dataset_s3_path)
 
@@ -68,9 +62,7 @@ if __name__ == "__main__":
         ["torch", "datasets", "boto3", "awscli", "'ray[data,train]'"]
     )
 
-    compute = kt.Compute(
-        gpus=gpus_per_node, image=img, secrets=[kt.secret(provider="aws")]
-    ).distribute(
+    compute = kt.Compute(gpus=gpus_per_node, image=img, secrets=[kt.secret(provider="aws")]).distribute(
         "ray",
         workers=num_nodes,
     )

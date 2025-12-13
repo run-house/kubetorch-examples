@@ -23,9 +23,7 @@ from torch.nn.parallel import DistributedDataParallel as DDP
 from torch.utils.data import DataLoader
 from transformers import AutoModelForSequenceClassification, AutoTokenizer
 
-warnings.filterwarnings(
-    "ignore", message="`resume_download` is deprecated", category=FutureWarning
-)
+warnings.filterwarnings("ignore", message="`resume_download` is deprecated", category=FutureWarning)
 
 # Configure NCCL to be more resilient to failures
 
@@ -62,9 +60,7 @@ class BERTTrainer:
 
         # Load model, tokenizer, and dataset (heavy operations which should block "ready" state)
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
-        self.model = AutoModelForSequenceClassification.from_pretrained(
-            self.model_name, num_labels=self.num_labels
-        )
+        self.model = AutoModelForSequenceClassification.from_pretrained(self.model_name, num_labels=self.num_labels)
         self.dataset = self._load_dataset()
         self.epoch = 0
         self.latest_loss = None  # Track latest loss for checkpointing
@@ -79,9 +75,7 @@ class BERTTrainer:
             print("Connecting to process group...")
             torch.distributed.init_process_group(backend="nccl")
         else:
-            print(
-                "Process group already initialized, completing setup for this instance."
-            )
+            print("Process group already initialized, completing setup for this instance.")
 
         self.rank = torch.distributed.get_rank()
         self.world_size = torch.distributed.get_world_size()
@@ -95,9 +89,7 @@ class BERTTrainer:
         self._sync_after_restart()
 
         self.model = DDP(self.model, device_ids=[self.device])
-        self.optimizer = torch.optim.AdamW(
-            self.model.parameters(), lr=self.learning_rate
-        )
+        self.optimizer = torch.optim.AdamW(self.model.parameters(), lr=self.learning_rate)
 
         # ## Collate Function for On-the-Fly Tokenization
         # Tokenize batches as they're loaded to avoid upfront processing delays
@@ -134,18 +126,14 @@ class BERTTrainer:
 
             def __iter__(self):
                 # Shuffle with fixed seed for this instance
-                dataset_iter = iter(
-                    self.dataset.shuffle(seed=self.epoch, buffer_size=1000)
-                )
+                dataset_iter = iter(self.dataset.shuffle(seed=self.epoch, buffer_size=1000))
                 # Each rank processes every world_size-th example
                 for i, example in enumerate(dataset_iter):
                     if i % self.world_size == self.rank:
                         yield example
 
         # Wrap the streaming dataset for distributed training with fixed epoch
-        distributed_dataset = DistributedStreamingWrapper(
-            self.dataset, self.rank, self.world_size, epoch=self.epoch
-        )
+        distributed_dataset = DistributedStreamingWrapper(self.dataset, self.rank, self.world_size, epoch=self.epoch)
 
         self.dataloader = DataLoader(
             distributed_dataset,
@@ -167,11 +155,7 @@ class BERTTrainer:
             return
 
         try:
-            model_state = (
-                self.model.module.state_dict()
-                if hasattr(self.model, "module")
-                else self.model.state_dict()
-            )
+            model_state = self.model.module.state_dict() if hasattr(self.model, "module") else self.model.state_dict()
 
             checkpoint = {
                 "epoch": self.epoch,
@@ -183,9 +167,7 @@ class BERTTrainer:
             torch.save(checkpoint, temp_path)
             temp_path.rename(checkpoint_path)
 
-            print(
-                f"Rank {self.rank}: Checkpoint saved at epoch {self.epoch} to {checkpoint_path}"
-            )
+            print(f"Rank {self.rank}: Checkpoint saved at epoch {self.epoch} to {checkpoint_path}")
 
         except Exception as e:
             print(f"Rank {self.rank}: Failed to save checkpoint: {e}")
@@ -205,9 +187,7 @@ class BERTTrainer:
             checkpoint = torch.load(checkpoint_path, map_location=self.device)
             self.model.load_state_dict(checkpoint["model_state_dict"])
             self.epoch = checkpoint["epoch"] + 1
-            print(
-                f"Rank {self.rank}: Restored from local checkpoint at epoch {checkpoint['epoch']}"
-            )
+            print(f"Rank {self.rank}: Restored from local checkpoint at epoch {checkpoint['epoch']}")
         else:
             print(f"Rank {self.rank}: No local checkpoint found")
             self.epoch = 0
@@ -235,13 +215,9 @@ class BERTTrainer:
         # This is crucial for maintaining training stability when workers are added/removed
         if self.epoch > 0:
             if self.rank == source_rank:
-                print(
-                    f"Rank {self.rank}: Broadcasting weights to other ranks (epoch {max_epoch})"
-                )
+                print(f"Rank {self.rank}: Broadcasting weights to other ranks (epoch {max_epoch})")
             else:
-                print(
-                    f"Rank {self.rank}: Receiving weights from rank {source_rank} (epoch {max_epoch})"
-                )
+                print(f"Rank {self.rank}: Receiving weights from rank {source_rank} (epoch {max_epoch})")
 
             for param in self.model.parameters():
                 torch.distributed.broadcast(param.data, src=source_rank)
@@ -301,9 +277,7 @@ class BERTTrainer:
             self.epoch += 1  # Update last completed epoch
             avg_epoch_loss = epoch_loss / max(num_batches, 1)
             self.latest_loss = avg_epoch_loss
-            print(
-                f"Rank {self.rank}: Epoch {epoch} complete, Avg Loss: {avg_epoch_loss:.4f}"
-            )
+            print(f"Rank {self.rank}: Epoch {epoch} complete, Avg Loss: {avg_epoch_loss:.4f}")
 
         return {
             "rank": self.rank,
@@ -317,12 +291,8 @@ class BERTTrainer:
 # The training adapts to workers being added or removed, redistributing the workload
 # and synchronizing model state across the new set of workers.
 def main():
-    parser = argparse.ArgumentParser(
-        description="PyTorch Distributed Training with Preemption Recovery"
-    )
-    parser.add_argument(
-        "--epochs", type=int, default=6, help="number of epochs to train (default: 5)"
-    )
+    parser = argparse.ArgumentParser(description="PyTorch Distributed Training with Preemption Recovery")
+    parser.add_argument("--epochs", type=int, default=6, help="number of epochs to train (default: 5)")
     parser.add_argument(
         "--batch-size",
         type=int,
@@ -346,9 +316,7 @@ def main():
     # Define compute environment with GPU support
     gpus = kt.Compute(
         gpus=1,  # 1 GPU per worker
-        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(
-            ["transformers==4.36.0", "datasets"]
-        ),
+        image=kt.Image(image_id="nvcr.io/nvidia/pytorch:23.10-py3").pip_install(["transformers==4.36.0", "datasets"]),
         launch_timeout=600,
     ).distribute("pytorch", workers=args.workers, port=12345)
 
@@ -417,9 +385,7 @@ def main():
             f"Epochs Completed = {rank_result['epochs_completed']}"
         )
 
-    print(
-        "\nNote: Training automatically adapted to world size changes and synchronized weights!"
-    )
+    print("\nNote: Training automatically adapted to world size changes and synchronized weights!")
 
 
 if __name__ == "__main__":

@@ -51,9 +51,7 @@ class OpenAIOSSInference:
         from accelerate import infer_auto_device_map, init_empty_weights
 
         with init_empty_weights():
-            self.model = AutoModelForCausalLM.from_pretrained(
-                self.model_name, torch_dtype=torch.bfloat16
-            )
+            self.model = AutoModelForCausalLM.from_pretrained(self.model_name, torch_dtype=torch.bfloat16)
 
         device_map = infer_auto_device_map(
             self.model,
@@ -66,9 +64,7 @@ class OpenAIOSSInference:
             self.model_name, torch_dtype="bfloat16", device_map=device_map
         )
 
-    def generate(
-        self, input, add_generation_prompt=True, max_tokens=200, temperature=0.7
-    ):
+    def generate(self, input, add_generation_prompt=True, max_tokens=200, temperature=0.7):
         if self.model is None:
             self.load_model()
 
@@ -83,9 +79,7 @@ class OpenAIOSSInference:
             return_dict=True,
         ).to(self.model.device)
 
-        outputs = self.model.generate(
-            **inputs, max_new_tokens=max_tokens, temperature=temperature
-        )
+        outputs = self.model.generate(**inputs, max_new_tokens=max_tokens, temperature=temperature)
         decoded_output = self.tokenizer.decode(outputs[0])
         print(decoded_output)
         return decoded_output
@@ -101,7 +95,5 @@ class OpenAIOSSInference:
 if __name__ == "__main__":
     prompt = "What is the best chocolate chip cookie?"
 
-    output = OpenAIOSSInference.generate(
-        prompt, max_tokens=200, add_generation_prompt=False
-    )
+    output = OpenAIOSSInference.generate(prompt, max_tokens=200, add_generation_prompt=False)
     print(f"Prompt: {prompt}, Generated text: {output}")
