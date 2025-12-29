@@ -6,7 +6,7 @@ model:
 inference_engine:
   dtype: "bfloat16"
   trust_remote_code: true
-  gpu_memory_utilization: 0.9
+  gpu_memory_utilization: 0.8
   max_model_len: 1024
   enforce_eager: false
   enable_lora: true
@@ -15,9 +15,9 @@ inference_engine:
 # Training configuration
 training:
   num_epochs: 5
-  batch_size: 64
+  batch_size: 32
   num_generations: 4
-  checkpoint_interval: 4
+  checkpoint_interval: 1
   eval_interval: 5
   eval_samples: 100
   num_workers: 4

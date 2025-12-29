@@ -1,13 +1,21 @@
 import gc
-import json
 import os
 import time
-from pathlib import Path
 from typing import Dict, List
 
 import numpy as np
 import torch
 import torch.nn.functional as F
+
+TARGET_MODULES = [
+    "q_proj",
+    "v_proj",
+    "k_proj",
+    "o_proj",
+    "gate_proj",
+    "up_proj",
+    "down_proj",
+]
 
 
 class GRPOTrainer:
@@ -55,15 +63,7 @@ class GRPOTrainer:
             r=self.lora_r,
             lora_alpha=self.lora_alpha,
             lora_dropout=self.lora_dropout,
-            target_modules=[
-                "q_proj",
-                "v_proj",
-                "k_proj",
-                "o_proj",
-                "gate_proj",
-                "up_proj",
-                "down_proj",
-            ],
+            target_modules=TARGET_MODULES,
             bias="none",
         )
         self.model = get_peft_model(self.model, lora_config)
@@ -279,7 +279,19 @@ class GRPOTrainer:
             rank = torch.distributed.get_rank()
             world_size = torch.distributed.get_world_size()
 
-            metrics_to_aggregate = [
+            # Define reduction operations per metric
+            max_metrics = {"reward_max"}
+            min_metrics = {"reward_min"}
+            sum_metrics = {
+                "num_samples",
+                "total_tokens",
+                "prompt_tokens",
+                "completion_tokens",
+            }
+            # All others use SUM then divide by world_size (average)
+
+            aggregated_metrics = local_metrics.copy()
+            for name in [
                 "reward_mean",
                 "reward_std",
                 "reward_max",
@@ -292,37 +304,17 @@ class GRPOTrainer:
                 "total_tokens",
                 "prompt_tokens",
                 "completion_tokens",
-            ]
-
-            aggregated_metrics = local_metrics.copy()
-
-            for metric_name in metrics_to_aggregate:
-                metric_tensor = torch.tensor(local_metrics[metric_name]).to(self.device)
-
-                if metric_name in ["reward_max"]:
-                    torch.distributed.all_reduce(
-                        metric_tensor, op=torch.distributed.ReduceOp.MAX
-                    )
-                elif metric_name in ["reward_min"]:
-                    torch.distributed.all_reduce(
-                        metric_tensor, op=torch.distributed.ReduceOp.MIN
-                    )
-                elif metric_name in [
-                    "num_samples",
-                    "total_tokens",
-                    "prompt_tokens",
-                    "completion_tokens",
-                ]:
-                    torch.distributed.all_reduce(
-                        metric_tensor, op=torch.distributed.ReduceOp.SUM
-                    )
+            ]:
+                t = torch.tensor(local_metrics[name]).to(self.device)
+                if name in max_metrics:
+                    torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.MAX)
+                elif name in min_metrics:
+                    torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.MIN)
                 else:
-                    torch.distributed.all_reduce(
-                        metric_tensor, op=torch.distributed.ReduceOp.SUM
-                    )
-                    metric_tensor /= world_size
-
-                aggregated_metrics[metric_name] = metric_tensor.item()
+                    torch.distributed.all_reduce(t, op=torch.distributed.ReduceOp.SUM)
+                    if name not in sum_metrics:
+                        t /= world_size
+                aggregated_metrics[name] = t.item()
 
             if rank == 0:
                 return {
@@ -330,47 +322,57 @@ class GRPOTrainer:
                     "timings": timings,
                     "step": self.steps,
                 }
-            else:
-                return {"metrics": {}, "timings": {}, "step": self.steps}
-        else:
-            return {"metrics": local_metrics, "timings": timings, "step": self.steps}
+            return {"metrics": {}, "timings": {}, "step": self.steps}
 
-    def save_checkpoint(self):
-        """Save LoRA checkpoint with versioning."""
-        self.checkpoint_version += 1
+        return {"metrics": local_metrics, "timings": timings, "step": self.steps}
 
-        checkpoint_path = Path(
-            f"qwen-lora-checkpoint-v{self.checkpoint_version}-{self.steps}-steps"
-        )
-
-        model_to_save = (
-            self.model.module if hasattr(self.model, "module") else self.model
-        )
-        model_to_save.save_pretrained(checkpoint_path.resolve())
-
-        metadata = {
-            "checkpoint_version": self.checkpoint_version,
-            "base_model": self.model_id,
+    def get_lora_state_dict(self):
+        """Extract LoRA parameters as CUDA tensors for GPU-to-GPU transfer."""
+        model = self.model.module if hasattr(self.model, "module") else self.model
+        return {
+            name: param.data
+            for name, param in model.named_parameters()
+            if "lora_" in name.lower()
         }
-        with open(checkpoint_path / "training_metadata.json", "w") as f:
-            json.dump(metadata, f, indent=2)
 
-        print(f"LoRA checkpoint v{self.checkpoint_version} saved at {checkpoint_path}")
-        return str(checkpoint_path), self.checkpoint_version
+    def get_peft_config(self):
+        """Get PEFT config dict for TensorLoRARequest."""
+        return {
+            "r": self.lora_r,
+            "lora_alpha": self.lora_alpha,
+            "lora_dropout": self.lora_dropout,
+            "target_modules": TARGET_MODULES,
+            "bias": "none",
+        }
 
-    def redeploy_inference(self, inference_service, checkpoint_path):
-        """Redeploy inference service with new checkpoint via rsync."""
+    def get_lora_metadata(self):
+        """Get tensor metadata (shapes, dtypes) for creating empty destination tensors."""
+        lora_state = self.get_lora_state_dict()
+        metadata = {
+            name: {"shape": list(t.shape), "dtype": str(t.dtype)}
+            for name, t in lora_state.items()
+        }
+        return metadata
+
+    def publish_lora_weights(self, key: str):
+        """Publish LoRA weights to kubetorch data store for GPU-to-GPU transfer."""
         import kubetorch as kt
-        from inference import vLLM
 
-        inference_service.compute.image.rsync(source=checkpoint_path, dest="./")
+        self.checkpoint_version += 1
+        lora_state = self.get_lora_state_dict()
+        self._published_lora_state = lora_state  # Keep reference to prevent GC
 
-        new_service = kt.cls(vLLM).to(
-            inference_service.compute,
-            init_args={
-                "model_id": self.model_id,
-                "lora_checkpoint": checkpoint_path,
-                "checkpoint_version": self.checkpoint_version,
-            },
+        total_params = sum(t.numel() for t in lora_state.values())
+        print(
+            f"[DEBUG] Publishing {len(lora_state)} tensors ({total_params:,} params) to key '{key}'"
         )
-        return new_service
+        if lora_state:
+            first_key = next(iter(lora_state))
+            first_tensor = lora_state[first_key]
+            print(
+                f"[DEBUG] First tensor '{first_key}': shape={first_tensor.shape}, device={first_tensor.device}"
+            )
+
+        kt.put(key=key, src=lora_state, verbose=True)
+        print(f"[DEBUG] kt.put() complete for key '{key}' (v{self.checkpoint_version})")
+        return key, self.checkpoint_version
