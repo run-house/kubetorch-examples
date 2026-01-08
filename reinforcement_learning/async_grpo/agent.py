@@ -1,3 +1,4 @@
+import asyncio
 import re
 from dataclasses import dataclass
 from typing import List, Optional
@@ -15,17 +16,68 @@ class RolloutBatch:
 
 
 class SimpleMathAgent:
-    """Math problem solver using vLLM."""
+    """Math problem solver using vLLM with optional sharded inference."""
 
-    def __init__(self, inference_service, config: dict, checkpoint_version=0):
+    def __init__(
+        self,
+        inference_service,
+        config: dict,
+        checkpoint_version=0,
+        num_inference_workers=1,
+    ):
         self.inference_service = inference_service
         self.checkpoint_version = checkpoint_version
         self.config = config
+        self.num_inference_workers = num_inference_workers
         self.system_prompt = (
             "You are a helpful math assistant. "
             "Solve the following problem step by step. "
-            "End with '#### <answer>' where <answer> is just the number."
+            "You should end with the answer after four pound signs "
+            "like '#### THE_ANSWER', where THE_ANSWER is just a number."
+            "End with that pattern have no further commentary or text after that"
         )
+
+    async def generate(self, prompts: List[str], **kwargs) -> tuple:
+        """Generate across inference workers and join results.
+
+        If num_inference_workers > 1, splits prompts into N chunks,
+        fires N parallel calls (kubetorch round-robins to workers),
+        and joins results.
+        """
+        if self.num_inference_workers <= 1:
+            return await self.inference_service.generate(prompts, **kwargs)
+
+        # Split prompts into N chunks
+        n = self.num_inference_workers
+        chunk_size = (len(prompts) + n - 1) // n
+        chunks = [prompts[i * chunk_size : (i + 1) * chunk_size] for i in range(n)]
+        chunks = [c for c in chunks if c]
+
+        # Fire N parallel calls - kubetorch round-robins to workers
+        results = await asyncio.gather(
+            *[self.inference_service.generate(chunk, **kwargs) for chunk in chunks]
+        )
+
+        # Join results maintaining order
+        all_completions = []
+        all_token_ids = []
+        for completions, token_ids in results:
+            all_completions.extend(completions)
+            all_token_ids.extend(token_ids)
+
+        return all_completions, all_token_ids
+
+    def _extract_answer(self, text):
+        """Extract numeric answer from text, trying multiple formats."""
+        # Try #### format first (GSM8K ground truth format)
+        match = re.search(r"####\s*([-+]?\d*\.?\d+)", text)
+        if match:
+            return match.group(1).strip()
+        # Try <answer> format (model output format)
+        match = re.search(r"<answer>\$?([-+]?[\d,]+\.?\d*)</answer>", text)
+        if match:
+            return match.group(1).strip().replace(",", "")
+        return None
 
     def _compute_rewards(self, completions, answers):
         rewards_config = self.config.get("rewards", {})
@@ -34,13 +86,8 @@ class SimpleMathAgent:
 
         rewards = []
         for completion, true_answer in zip(completions, answers):
-            match = re.search(r"####\s*([-+]?\d*\.?\d+)", completion)
-            pred_answer = match.group(1).strip() if match else None
-
-            true_match = re.search(r"####\s*([-+]?\d*\.?\d+)", true_answer)
-            true_value = (
-                true_match.group(1).strip() if true_match else true_answer.strip()
-            )
+            pred_answer = self._extract_answer(completion)
+            true_value = self._extract_answer(true_answer)
 
             reward = correct_reward if pred_answer == true_value else incorrect_reward
             rewards.append(reward)
@@ -59,7 +106,7 @@ class SimpleMathAgent:
         ]
 
         gen_config = self.config.get("generation", {})
-        completions, token_ids = await self.inference_service.generate(
+        completions, token_ids = await self.generate(
             prompts,
             request_version=self.checkpoint_version,
             max_tokens=gen_config.get("max_tokens", 512),
@@ -95,7 +142,7 @@ class SimpleMathAgent:
         ]
 
         gen_config = self.config.get("generation", {})
-        completions, _ = await self.inference_service.generate(
+        completions, _ = await self.generate(
             prompts,
             request_version=self.checkpoint_version,
             max_tokens=gen_config.get("max_tokens", 512),
@@ -113,19 +160,19 @@ class SimpleMathAgent:
         total = len(eval_questions)
 
         for i, (completion, true_answer) in enumerate(zip(completions, eval_answers)):
-            match = re.search(r"####\s*([-+]?\d*\.?\d+)", completion)
-            pred_answer = match.group(1).strip() if match else None
-
-            true_match = re.search(r"####\s*([-+]?\d*\.?\d+)", true_answer)
-            true_value = (
-                true_match.group(1).strip() if true_match else true_answer.strip()
-            )
+            pred_answer = self._extract_answer(completion)
+            true_value = self._extract_answer(true_answer)
 
             is_correct = pred_answer == true_value
             if is_correct:
                 correct += 1
 
             if i < 3:
+                # Debug: show end of completion where answer should be
+                completion_end = (
+                    completion[-300:].replace("\n", "\\n") if completion else "<empty>"
+                )
+                print(f"[EVAL DEBUG] Example {i+1} completion end: ...{completion_end}")
                 print(
                     f"[EVAL] Example {i+1}: Predicted: {pred_answer}, True: {true_value}, Correct: {is_correct}"
                 )

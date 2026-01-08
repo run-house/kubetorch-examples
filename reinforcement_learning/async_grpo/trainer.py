@@ -346,33 +346,51 @@ class GRPOTrainer:
         }
 
     def get_lora_metadata(self):
-        """Get tensor metadata (shapes, dtypes) for creating empty destination tensors."""
-        lora_state = self.get_lora_state_dict()
-        metadata = {
+        """Get LoRA tensor metadata (names, shapes, dtypes) for polling setup."""
+        if self.model is None:
+            self.setup()
+        state = self.get_lora_state_dict()
+        return {
             name: {"shape": list(t.shape), "dtype": str(t.dtype)}
-            for name, t in lora_state.items()
+            for name, t in state.items()
         }
-        return metadata
+
+    def publish_lora_metadata(self):
+        """Publish LoRA metadata as JSON file for inference workers to discover."""
+        import json
+
+        import kubetorch as kt
+
+        metadata = self.get_lora_metadata()
+        meta_path = "/tmp/lora_metadata.json"
+        with open(meta_path, "w") as f:
+            json.dump(metadata, f)
+        kt.put(key="lora/metadata", src=meta_path)
+        print(f"[PUBLISH] Published LoRA metadata ({len(metadata)} tensors)")
 
     def publish_lora_weights(self, key: str):
-        """Publish LoRA weights to kubetorch data store for GPU-to-GPU transfer."""
+        """Publish LoRA weights to data store."""
         import kubetorch as kt
 
         self.checkpoint_version += 1
         lora_state = self.get_lora_state_dict()
-        self._published_lora_state = lora_state  # Keep reference to prevent GC
+        self._published_lora_state = lora_state
 
         total_params = sum(t.numel() for t in lora_state.values())
+        total_bytes = sum(t.numel() * t.element_size() for t in lora_state.values())
         print(
-            f"[DEBUG] Publishing {len(lora_state)} tensors ({total_params:,} params) to key '{key}'"
+            f"[PUBLISH] {len(lora_state)} tensors, {total_params:,} params, {total_bytes/1e6:.2f} MB"
         )
-        if lora_state:
-            first_key = next(iter(lora_state))
-            first_tensor = lora_state[first_key]
-            print(
-                f"[DEBUG] First tensor '{first_key}': shape={first_tensor.shape}, device={first_tensor.device}"
-            )
 
+        t0 = time.time()
         kt.put(key=key, src=lora_state, verbose=True)
-        print(f"[DEBUG] kt.put() complete for key '{key}' (v{self.checkpoint_version})")
-        return key, self.checkpoint_version
+        elapsed = time.time() - t0
+        throughput = total_bytes / elapsed / 1e6
+        print(f"[PUBLISH] kt.put() took {elapsed:.3f}s ({throughput:.1f} MB/s)")
+
+        metadata = {
+            name: {"shape": list(t.shape), "dtype": str(t.dtype)}
+            for name, t in lora_state.items()
+        }
+
+        return key, self.checkpoint_version, metadata

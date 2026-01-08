@@ -37,14 +37,21 @@ async def run_grpo(
 ):
     """Async GRPO training loop: inference ahead by 1, train sequentially."""
     train_config = config.get("training", {})
+    inference_config = config.get("inference", {})
     num_epochs = train_config.get("num_epochs", 3)
     batch_size = train_config.get("batch_size", 8)
     num_generations = train_config.get("num_generations", 4)
     checkpoint_interval = train_config.get("checkpoint_interval", 10)
     eval_interval = train_config.get("eval_interval", 5)
     eval_samples = train_config.get("eval_samples", 100)
+    num_inference_workers = inference_config.get("num_workers", 1)
 
-    agent = SimpleMathAgent(inference_service, config, checkpoint_version=0)
+    agent = SimpleMathAgent(
+        inference_service,
+        config,
+        checkpoint_version=0,
+        num_inference_workers=num_inference_workers,
+    )
     print(
         f"Starting GRPO: {num_epochs} epochs, {len(dataset) // batch_size} batches/epoch"
     )
@@ -90,13 +97,11 @@ async def run_grpo(
 
                 if pending_rollout.step % checkpoint_interval == 0:
                     key = f"lora/v{pending_rollout.step}"
-                    _, new_version = (
+                    _, new_version, _ = (
                         await train_service.publish_lora_weights(key, workers=[0])
                     )[0]
-                    metadata = (await train_service.get_lora_metadata(workers=[0]))[0]
-                    await agent.inference_service.load_lora_from_store(key, metadata)
                     agent.checkpoint_version = new_version
-                    print(f"[CHECKPOINT] v{new_version}")
+                    print(f"[CHECKPOINT] Published v{new_version}")
 
                 if pending_rollout.step % eval_interval == 0:
                     eval_task = asyncio.create_task(
@@ -142,6 +147,7 @@ async def main():
     config = load_config()
     MODEL_ID = config["model"]["id"]
     trainer_config = config.get("trainer", {})
+    inference_config = config.get("inference", {})
 
     print("Loading GSM8K datasets...")
     dataset = load_dataset("gsm8k", "main", split="train")
@@ -154,7 +160,7 @@ async def main():
             "-r async_grpo/requirements-inference.txt"
         ),
         launch_timeout=1200,
-    )
+    ).autoscale(min_scale=inference_config.get("num_workers", 1))
 
     train_compute = kt.Compute(
         gpus=1,
@@ -211,6 +217,9 @@ async def main():
     train_service.async_ = True
 
     await train_service.setup()
+
+    # Publish LoRA metadata for inference workers to discover (poller starts automatically on init)
+    await train_service.publish_lora_metadata(workers=[0])
 
     await run_grpo(
         dataset,

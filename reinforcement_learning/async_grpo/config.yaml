@@ -2,6 +2,10 @@
 model:
   id: "Qwen/Qwen2.5-0.5B-Instruct"
 
+# Inference configuration
+inference:
+  num_workers: 2
+
 # Inference engine configuration (AsyncEngineArgs)
 inference_engine:
   dtype: "bfloat16"
