@@ -10,7 +10,7 @@ import kubetorch as kt
 
 
 class SimplevLLM:
-    """Simple OCR processor using DeepSeek-OCR with vLLM."""
+    """Simple vLLM inference using async engine."""
 
     def __init__(self):
         # Kill any residual vLLM process in GPU memory upon restart
