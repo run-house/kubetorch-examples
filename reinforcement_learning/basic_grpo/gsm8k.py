@@ -417,7 +417,7 @@ class GRPOTrainer:
         # We do this from the training service so we can sync the latest checkpoint into the inference service
         # image. We could also just save it to a shared storage location like blob storage and redeploy from within
         # the AsyncGRPOPipeline.
-        inference_service.compute.image.rsync(source=self.latest_checkpoint, dest="./")
+        inference_service.compute.image.copy(source=self.latest_checkpoint, dest="./")
 
         print(
             f"Redeploying inference service with checkpoint: {self.latest_checkpoint}"
