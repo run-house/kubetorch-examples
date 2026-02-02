@@ -1,3 +1,31 @@
+# # Async RL Training with Kubetorch
+# This example demonstrates asynchronous GRPO training, overlapping inference and training.
+#
+# In the context of this example, you can understand Kubetorch as an actor framework.
+# The key components are modularized into
+# [separate files](https://github.com/run-house/kubetorch-examples/tree/main/reinforcement_learning/async_grpo)
+# not shown here:
+# - `inference.py`: vLLM-based inference with dynamic LoRA weight loading
+# - `trainer.py`: DDP-based training with LoRA and weight publishing
+# - `agent.py`: MathAgent that coordinates rollout generation and reward calculation
+#
+# Checkpoints are published as LoRA weights to the Kubetorch data store, which allow
+# the inference workers to poll for updates and load the weights as tensors via
+# GPU-to-GPU transfer directly. This logic is contained within the inference
+# and training classes.
+#
+# We import and deploy these as actors to different compute in `main()`.
+# Specifically, the vLLM inference is deployed to horizontally scaling replicas with GPUs
+# while the training is a set of workers with PyTorch distributed wired up between them.
+#
+# These deployed actors are now callable from any Python process. Specifically,
+# the logic of orchestrating the execution is contained within the `run_grpo()` function
+# which makes calls from wherever you run `python gsm8k_async_simple.py` into the
+# running training and inference services.
+#
+# The training loop uses a simple "inference ahead by 1" pattern where we always
+# have the next batch's inference running while training on the current batch.
+
 import asyncio
 from pathlib import Path
 
@@ -32,6 +60,13 @@ async def run_eval_in_background(
         print(f"[EVAL] Failed at step {step}: {e}")
 
 
+# ## Async GRPO Training Loop
+# The core training loop that overlaps inference and training. For each batch:
+# 1. Start generating rollouts for the next batch (non-blocking)
+# 2. Train on the previous batch's rollouts
+# 3. Periodically publish LoRA checkpoints and run evaluations
+#
+# This "inference ahead by 1" pattern keeps both inference and training GPUs busy.
 async def run_grpo(
     dataset, test_dataset, train_service, inference_service, config: dict
 ):
@@ -140,6 +175,11 @@ async def run_grpo(
     print("\nTraining complete!")
 
 
+# ## Setup and Deploy with Kubetorch
+# Sets up inference and training services on Kubernetes using Kubetorch. The inference
+# service uses autoscaling with vLLM, while training uses PyTorch DDP across multiple
+# workers. LoRA weights are published to a shared location that inference workers poll
+# for updates, enabling dynamic weight loading without service restarts.
 async def main():
     print("Starting")
     from datasets import load_dataset
